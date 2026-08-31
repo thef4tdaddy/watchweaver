@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,9 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const (
-	defaultMigrationsDir = "migrations"
-)
+const defaultMigrationsDir = "migrations"
 
 //go:embed migrations/*.up.sql
 var embeddedMigrations embed.FS
@@ -51,13 +50,20 @@ func OpenAndMigrate(opts Options) (*sql.DB, error) {
 	return db, nil
 }
 
-func openSQLite(path string) (*sql.DB, error) {
-	dbDir := filepath.Dir(path)
+func openSQLite(dbPath string) (*sql.DB, error) {
+	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	// modernc.org/sqlite applies each _pragma parameter when a new connection is
+	// opened. This keeps foreign-key enforcement enabled across database/sql's
+	// connection pool instead of relying on a one-time, connection-local PRAGMA.
+	query := url.Values{}
+	query.Add("_pragma", "foreign_keys(1)")
+	dsn := "file:" + filepath.ToSlash(dbPath) + "?" + query.Encode()
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -65,11 +71,6 @@ func openSQLite(path string) (*sql.DB, error) {
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite database: %w", err)
-	}
-
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	var foreignKeysEnabled int
@@ -86,6 +87,10 @@ func openSQLite(path string) (*sql.DB, error) {
 	if err := db.QueryRow("PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set wal mode: %w", err)
+	}
+	if !strings.EqualFold(journalMode, "wal") {
+		_ = db.Close()
+		return nil, fmt.Errorf("wal mode not enabled: got %q", journalMode)
 	}
 
 	return db, nil
