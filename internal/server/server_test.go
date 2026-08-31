@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewServerConstruction(t *testing.T) {
-	h := NewHandler()
+	h := NewHandler(NewReadiness())
 	s := New(":1234", h)
 
 	if s.Addr != ":1234" {
@@ -25,7 +25,7 @@ func TestServeGracefulShutdownOnContextCancel(t *testing.T) {
 		t.Fatalf("listen failed: %v", err)
 	}
 
-	s := New(listener.Addr().String(), NewHandler())
+	s := New(listener.Addr().String(), NewHandler(NewReadiness()))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

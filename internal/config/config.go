@@ -7,13 +7,15 @@ import (
 )
 
 const (
-	defaultListenAddr     = ":8080"
-	defaultShutdownTimout = 10 * time.Second
+	defaultListenAddr      = ":8080"
+	defaultShutdownTimeout = 10 * time.Second
+	defaultDatabasePath    = "/data/watchweaver.db"
 )
 
 type Config struct {
 	ListenAddr      string
 	ShutdownTimeout time.Duration
+	DatabasePath    string
 }
 
 func Load() Config {
@@ -22,15 +24,21 @@ func Load() Config {
 		listenAddr = defaultListenAddr
 	}
 
-	shutdownTimeout := defaultShutdownTimout
+	shutdownTimeout := defaultShutdownTimeout
 	if raw := strings.TrimSpace(os.Getenv("WATCHWEAVER_SHUTDOWN_TIMEOUT")); raw != "" {
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			shutdownTimeout = parsed
 		}
 	}
 
+	databasePath := strings.TrimSpace(os.Getenv("WATCHWEAVER_DATABASE"))
+	if databasePath == "" {
+		databasePath = defaultDatabasePath
+	}
+
 	return Config{
 		ListenAddr:      listenAddr,
 		ShutdownTimeout: shutdownTimeout,
+		DatabasePath:    databasePath,
 	}
 }
