@@ -9,11 +9,13 @@ import (
 const (
 	defaultListenAddr     = ":8080"
 	defaultShutdownTimout = 10 * time.Second
+	defaultDatabasePath   = "/data/watchweaver.db"
 )
 
 type Config struct {
 	ListenAddr      string
 	ShutdownTimeout time.Duration
+	DatabasePath    string
 }
 
 func Load() Config {
@@ -29,8 +31,14 @@ func Load() Config {
 		}
 	}
 
+	databasePath := strings.TrimSpace(os.Getenv("WATCHWEAVER_DATABASE"))
+	if databasePath == "" {
+		databasePath = defaultDatabasePath
+	}
+
 	return Config{
 		ListenAddr:      listenAddr,
 		ShutdownTimeout: shutdownTimeout,
+		DatabasePath:    databasePath,
 	}
 }
