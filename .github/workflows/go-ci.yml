@@ -1,0 +1,44 @@
+name: Go CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE_MIN: "64.3"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test with race and coverage
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out
+
+      - name: Enforce coverage floor
+        run: |
+          total_coverage="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')"
+          echo "Total coverage: ${total_coverage}%"
+          awk -v total="$total_coverage" -v min="$COVERAGE_MIN" 'BEGIN {
+            if (total + 0 < min + 0) {
+              printf("Coverage %.1f%% is below required floor %.1f%%\\n", total, min)
+              exit 1
+            }
+            printf("Coverage %.1f%% meets required floor %.1f%%\\n", total, min)
+          }'
