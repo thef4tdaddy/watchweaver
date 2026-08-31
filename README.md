@@ -15,7 +15,7 @@ The goal is to let your media server or scrobbler keep tracking automatically wh
 
 - Import movie and TV watch activity from Trakt
 - Preserve episode-level watch history locally
-- Prompt for ratings and reviews through Discord
+- Announce rating/review tasks through optional Discord notifications
 - Write supported ratings back to Trakt
 - Apply smart TV rating rules:
   - Prompt for completed seasons while bingeing older shows
@@ -55,6 +55,35 @@ Trakt is intended to provide automated viewing activity. WatchWeaver maintains i
 WatchWeaver is currently **pre-alpha / planning**. There is no usable release yet.
 
 Development will be planned publicly through GitHub issues before implementation begins.
+
+## Local development commands
+
+### Frontend (React + TypeScript + Vite)
+
+From the repository root:
+
+```bash
+cd web
+npm ci
+npm run test
+npm run typecheck
+npm run build
+npm run dev
+```
+
+- `npm run test` runs Vitest in non-interactive CI mode.
+- `npm run build` writes production assets to `web/dist`.
+
+### Backend (Go)
+
+From the repository root:
+
+```bash
+go test ./...
+go run ./cmd/watchweaver
+```
+
+When `web/dist/index.html` exists, the Go server serves frontend assets and SPA routes from `web/dist` on the same origin as the API and health/readiness endpoints.
 
 ## Contributing
 
