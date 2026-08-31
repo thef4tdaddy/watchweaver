@@ -12,7 +12,7 @@ func TestHealthzReturnsOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rr := httptest.NewRecorder()
 
-	NewHandler().ServeHTTP(rr, req)
+	NewHandler(NewReadiness()).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rr.Code)
@@ -31,7 +31,7 @@ func TestHealthzRejectsNonGET(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	rr := httptest.NewRecorder()
 
-	NewHandler().ServeHTTP(rr, req)
+	NewHandler(NewReadiness()).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected status 405, got %d", rr.Code)
@@ -42,7 +42,7 @@ func TestRootPathReturnsNotFoundWhenStaticAssetsAreUnavailable(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	newHandler(nil).ServeHTTP(rr, req)
+	newHandler(NewReadiness(), nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", rr.Code)
@@ -50,7 +50,7 @@ func TestRootPathReturnsNotFoundWhenStaticAssetsAreUnavailable(t *testing.T) {
 }
 
 func TestStaticAssetIsServedWhenPresent(t *testing.T) {
-	handler := newHandler(fstest.MapFS{
+	handler := newHandler(NewReadiness(), fstest.MapFS{
 		"index.html":       {Data: []byte("<!doctype html><html><body>WatchWeaver</body></html>")},
 		"assets/app.js":    {Data: []byte("console.log('ok')")},
 		"assets/style.css": {Data: []byte("body{margin:0}")},
@@ -70,7 +70,7 @@ func TestStaticAssetIsServedWhenPresent(t *testing.T) {
 }
 
 func TestSPAFallbackServesIndexHTMLForUnknownRoute(t *testing.T) {
-	handler := newHandler(fstest.MapFS{
+	handler := newHandler(NewReadiness(), fstest.MapFS{
 		"index.html": {Data: []byte("<!doctype html><html><body>WatchWeaver SPA</body></html>")},
 	})
 
