@@ -56,6 +56,32 @@ WatchWeaver is currently **pre-alpha / planning**. There is no usable release ye
 
 Development will be planned publicly through GitHub issues before implementation begins.
 
+## Local development commands
+
+### Frontend (React + TypeScript + Vite)
+
+```bash
+cd /home/runner/work/watchweaver/watchweaver/web
+npm install
+npm run dev
+npm run test
+npm run typecheck
+npm run build
+```
+
+- `npm run test` runs Vitest in non-interactive CI mode.
+- `npm run build` writes production assets to `/home/runner/work/watchweaver/watchweaver/web/dist`.
+
+### Backend (Go)
+
+```bash
+cd /home/runner/work/watchweaver/watchweaver
+go test ./...
+go run ./cmd/watchweaver
+```
+
+When `/home/runner/work/watchweaver/watchweaver/web/dist/index.html` exists, the Go server serves frontend assets and SPA routes from `web/dist` on the same origin as the API/health endpoints.
+
 ## Contributing
 
 Contributions and ideas are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a large pull request.
