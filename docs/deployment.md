@@ -88,6 +88,10 @@ Examples include:
 - bootstrap integration credentials/secrets where appropriate
 - reverse-proxy/base-URL related settings where needed
 
+For the bootstrap HTTP server, v0.1 defines:
+
+- `WATCHWEAVER_LISTEN_ADDR` with default `:8080`
+
 ### UI-managed application settings
 
 Normal runtime preferences should live in the WatchWeaver database and be editable through the web UI where practical.
