@@ -36,6 +36,20 @@ Until then:
 3. Update documentation when changing user-visible behavior or configuration.
 4. Do not introduce an unofficial/private third-party API as a hard dependency of the core workflow without prior discussion.
 
+### Local CI-equivalent checks
+
+Run from repository root:
+
+```bash
+go vet ./...
+go test -race -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+CI enforces a repository-wide coverage floor (currently `64.3%`) using the total value from `go tool cover -func=coverage.out`. Increase the floor intentionally in `.github/workflows/go-ci.yml` when coverage improves.
+
+The race detector is enabled in CI on `ubuntu-latest`, where Go race builds are supported.
+
 ## Pull requests
 
 Pull requests should explain what changed, why it changed, how it was tested, and any new configuration or migration requirements.
