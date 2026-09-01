@@ -22,12 +22,13 @@ func TestOpenAndMigrateFreshDatabase(t *testing.T) {
 	assertTableExists(t, db, "app_metadata")
 	assertTableExists(t, db, "schema_migrations")
 
+	expected := embeddedMigrationCount(t)
 	var migrationCount int
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("expected 1 applied migration, got %d", migrationCount)
+	if migrationCount != expected {
+		t.Fatalf("expected %d applied migrations, got %d", expected, migrationCount)
 	}
 }
 
@@ -46,12 +47,13 @@ func TestOpenAndMigrateIsIdempotent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = second.Close() })
 
+	expected := embeddedMigrationCount(t)
 	var migrationCount int
 	if err := second.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("expected 1 migration record after restart, got %d", migrationCount)
+	if migrationCount != expected {
+		t.Fatalf("expected %d migration records after restart, got %d", expected, migrationCount)
 	}
 }
 
@@ -196,6 +198,15 @@ func TestRunMigrationsErrorsForInvalidMigrationName(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid migration") {
 		t.Fatalf("expected invalid migration error, got %v", err)
 	}
+}
+
+func embeddedMigrationCount(t *testing.T) int {
+	t.Helper()
+	migrations, err := loadMigrations(embeddedMigrations, defaultMigrationsDir)
+	if err != nil {
+		t.Fatalf("load embedded migrations: %v", err)
+	}
+	return len(migrations)
 }
 
 func openTestDB(t *testing.T) *sql.DB {
