@@ -20,6 +20,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Normalize module graph
+        run: go mod tidy
       - name: Go vet
         run: go vet ./...
       - name: Go test with race and coverage
