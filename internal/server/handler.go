@@ -72,9 +72,16 @@ func newSPAHandler(staticAssets fs.FS) http.Handler {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		fallback := r.Clone(r.Context())
-		fallback.URL.Path = "/index.html"
-		fileServer.ServeHTTP(w, fallback)
+		index, err := fs.ReadFile(staticAssets, "index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(index)
+		}
 	})
 }
 
