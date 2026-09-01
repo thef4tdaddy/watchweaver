@@ -3,6 +3,8 @@ package trakt
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -11,42 +13,18 @@ const (
 	DefaultPollOverlap = 10 * time.Minute
 )
 
-type IncrementalImporter interface {
-	ImportIncrementalSince(context.Context, time.Time) (HistoryImportResult, error)
-}
+type IncrementalImporter interface { ImportIncrementalSince(context.Context, time.Time) (HistoryImportResult, error) }
+type PollerOptions struct { Interval, Overlap time.Duration; Now func() time.Time; Sleep func(context.Context,time.Duration) error; MaxRetries int }
+type Poller struct { db *sql.DB; importer IncrementalImporter; interval,overlap time.Duration; now func()time.Time; sleep func(context.Context,time.Duration)error; maxRetries int }
+type PollStatus struct { LastSuccess *time.Time; LastError string; ConsecutiveFailures int }
 
-type PollerOptions struct {
-	Interval time.Duration
-	Overlap time.Duration
-	Now func() time.Time
-	Sleep func(context.Context, time.Duration) error
-	MaxRetries int
-}
+func NewPoller(db *sql.DB, importer IncrementalImporter, o PollerOptions)*Poller{if o.Interval<=0{o.Interval=DefaultPollInterval};if o.Overlap<=0{o.Overlap=DefaultPollOverlap};if o.Now==nil{o.Now=time.Now};if o.Sleep==nil{o.Sleep=sleepContext};if o.MaxRetries<=0{o.MaxRetries=3};return &Poller{db:db,importer:importer,interval:o.Interval,overlap:o.Overlap,now:o.Now,sleep:o.Sleep,maxRetries:o.MaxRetries}}
 
-type Poller struct {
-	db *sql.DB
-	importer IncrementalImporter
-	interval time.Duration
-	overlap time.Duration
-	now func() time.Time
-	sleep func(context.Context, time.Duration) error
-	maxRetries int
-}
+func(p *Poller)Run(ctx context.Context)error{_ = p.Poll(ctx);t:=time.NewTicker(p.interval);defer t.Stop();for{select{case<-ctx.Done():return ctx.Err();case<-t.C:_=p.Poll(ctx)}}}
 
-func NewPoller(db *sql.DB, importer IncrementalImporter, opts PollerOptions) *Poller {
-	if opts.Interval <= 0 { opts.Interval = DefaultPollInterval }
-	if opts.Overlap <= 0 { opts.Overlap = DefaultPollOverlap }
-	if opts.Now == nil { opts.Now = time.Now }
-	if opts.Sleep == nil { opts.Sleep = sleepContext }
-	if opts.MaxRetries <= 0 { opts.MaxRetries = 3 }
-	return &Poller{db: db, importer: importer, interval: opts.Interval, overlap: opts.Overlap, now: opts.Now, sleep: opts.Sleep, maxRetries: opts.MaxRetries}
-}
+func(p *Poller)Poll(ctx context.Context)error{cp,err:=p.checkpoint(ctx);if err!=nil{return err};since:=cp.Add(-p.overlap);var last error;for n:=0;n<p.maxRetries;n++{_,last=p.importer.ImportIncrementalSince(ctx,since);if last==nil{now:=p.now().UTC();if err=p.set(ctx,"history_poll_checkpoint",now.Format(time.RFC3339Nano));err!=nil{return err};_ = p.set(ctx,"history_poll_last_success",now.Format(time.RFC3339Nano));_ = p.set(ctx,"history_poll_last_error","");_ = p.set(ctx,"history_poll_failures","0");return nil};_ = p.set(ctx,"history_poll_last_error",last.Error());_ = p.set(ctx,"history_poll_failures",strconv.Itoa(n+1));if n+1<p.maxRetries{if err=p.sleep(ctx,time.Second<<n);err!=nil{return err}}};return fmt.Errorf("trakt history poll failed after %d attempts: %w",p.maxRetries,last)}
 
-func sleepContext(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done(): return ctx.Err()
-	case <-t.C: return nil
-	}
-}
+func(p *Poller)checkpoint(ctx context.Context)(time.Time,error){var raw string;err:=p.db.QueryRowContext(ctx,`SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='history_poll_checkpoint'`).Scan(&raw);if err==sql.ErrNoRows{var max sql.NullString;if err=p.db.QueryRowContext(ctx,`SELECT MAX(watched_at_utc) FROM watch_events WHERE source='trakt'`).Scan(&max);err!=nil{return time.Time{},err};if !max.Valid{return p.now().UTC(),nil};return time.Parse(time.RFC3339,max.String)};if err!=nil{return time.Time{},err};return time.Parse(time.RFC3339Nano,raw)}
+func(p *Poller)set(ctx context.Context,key,value string)error{_,err:=p.db.ExecContext(ctx,`INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt',?,?) ON CONFLICT(integration,state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,key,value);return err}
+func(p *Poller)Status(ctx context.Context)(PollStatus,error){var s PollStatus;var raw string;if err:=p.db.QueryRowContext(ctx,`SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='history_poll_last_success'`).Scan(&raw);err==nil{t,e:=time.Parse(time.RFC3339Nano,raw);if e!=nil{return s,e};s.LastSuccess=&t}else if err!=sql.ErrNoRows{return s,err};_ = p.db.QueryRowContext(ctx,`SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='history_poll_last_error'`).Scan(&s.LastError);if err:=p.db.QueryRowContext(ctx,`SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='history_poll_failures'`).Scan(&raw);err==nil{s.ConsecutiveFailures,_=strconv.Atoi(raw)};return s,nil}
+func sleepContext(ctx context.Context,d time.Duration)error{t:=time.NewTimer(d);defer t.Stop();select{case<-ctx.Done():return ctx.Err();case<-t.C:return nil}}
