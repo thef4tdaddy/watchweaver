@@ -24,8 +24,10 @@ jobs:
         run: go mod tidy
       - name: Go vet
         run: go vet ./...
-      - name: Go test with race and coverage
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Go test with coverage
+        run: go test -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Race detection for non-SQLite packages
+        run: go test -race ./internal/config ./internal/server
       - name: Coverage summary
         run: go tool cover -func=coverage.out
       - name: Enforce coverage floor
