@@ -12,6 +12,7 @@ import (
 	"github.com/thef4tdaddy/watchweaver/internal/config"
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 	"github.com/thef4tdaddy/watchweaver/internal/server"
+	"github.com/thef4tdaddy/watchweaver/internal/trakt"
 )
 
 func main() {
@@ -34,11 +35,36 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	startTraktPoller(ctx, db, cfg)
+
 	log.Printf("watchweaver listening on %s", listener.Addr().String())
 
 	if err := server.Serve(ctx, httpServer, listener, cfg.ShutdownTimeout); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("server failed: %v", err)
 	}
+}
+
+func startTraktPoller(ctx context.Context, db *sql.DB, cfg config.Config) {
+	if cfg.TraktClientID == "" || cfg.TraktClientSecret == "" {
+		return
+	}
+
+	var accessToken string
+	if err := db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='access_token'`).Scan(&accessToken); err != nil || accessToken == "" {
+		return
+	}
+
+	importer := trakt.NewHistoryImporter(db, cfg.TraktBaseURL, nil, accessToken)
+	poller := trakt.NewPoller(db, importer, trakt.PollerOptions{
+		Interval: cfg.TraktPollInterval,
+		Overlap:  cfg.TraktPollOverlap,
+	})
+
+	go func() {
+		if err := poller.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("trakt history poller stopped: %v", err)
+		}
+	}()
 }
 
 func initialize(readiness *server.Readiness, options persistence.Options) (*sql.DB, error) {
