@@ -26,11 +26,19 @@ func TestServiceApplyPersistsTaskWithoutRatingSnapshot(t *testing.T) {
 
 	service := NewService(db)
 	batch := Batch{NewMovieWatches: []int64{movieID}}
-	if _, err := service.Apply(context.Background(), batch); err != nil {
+	first, err := service.Apply(context.Background(), batch)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Apply(context.Background(), batch); err != nil {
+	if len(first) != 1 || first[0].MediaID != movieID {
+		t.Fatalf("first Apply() = %#v, want one created movie decision", first)
+	}
+	second, err := service.Apply(context.Background(), batch)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second Apply() = %#v, want no newly created decisions", second)
 	}
 
 	var tasks int
@@ -51,6 +59,28 @@ func TestServiceApplyPersistsTaskWithoutRatingSnapshot(t *testing.T) {
 	}
 }
 
+func TestServiceApplyDeduplicatesRepeatedDecisionsWithinBatch(t *testing.T) {
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "duplicate-batch.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	result, err := db.Exec(`INSERT INTO media_items(media_type,title,year) VALUES('movie','Duplicate',2026)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movieID, _ := result.LastInsertId()
+
+	created, err := NewService(db).Apply(context.Background(), Batch{NewMovieWatches: []int64{movieID, movieID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 1 || created[0].MediaID != movieID {
+		t.Fatalf("Apply() = %#v, want one newly persisted decision", created)
+	}
+}
+
 func TestServiceApplyAllowsNewMoviePromptAfterCompletedPriorTask(t *testing.T) {
 	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "rewatch.db")})
 	if err != nil {
@@ -67,8 +97,12 @@ func TestServiceApplyAllowsNewMoviePromptAfterCompletedPriorTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewService(db).Apply(context.Background(), Batch{NewMovieWatches: []int64{movieID}}); err != nil {
+	created, err := NewService(db).Apply(context.Background(), Batch{NewMovieWatches: []int64{movieID}})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(created) != 1 || created[0].MediaID != movieID {
+		t.Fatalf("Apply() = %#v, want one new rewatch decision", created)
 	}
 
 	var pending int
