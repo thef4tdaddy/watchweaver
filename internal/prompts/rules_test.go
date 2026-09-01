@@ -11,7 +11,7 @@ func TestEvaluateRules(t *testing.T) {
 		in   Batch
 		want []Decision
 	}{
-		{name: "baseline silent", in: Batch{Baseline: true, NewMovieWatches: []int64{1}}, want: []Decision{}},
+		{name: "baseline silent", in: Batch{Baseline: true, NewMovieWatches: []int64{1}}, want: nil},
 		{name: "movie watch", in: Batch{NewMovieWatches: []int64{1}}, want: []Decision{{Kind: MovieRating, MediaID: 1}}},
 		{name: "movie rewatch remains eligible", in: Batch{NewMovieWatches: []int64{1, 1}}, want: []Decision{{Kind: MovieRating, MediaID: 1}, {Kind: MovieRating, MediaID: 1}}},
 		{name: "ignored movie silent", in: Batch{NewMovieWatches: []int64{1}, IgnoredMovieIDs: map[int64]bool{1: true}}, want: []Decision{}},
