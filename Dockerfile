@@ -12,7 +12,8 @@ RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
-RUN rm -rf internal/server/static && cp -R web/dist internal/server/static
+RUN rm -rf internal/server/static
+COPY --from=frontend /src/web/dist ./internal/server/static
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/watchweaver ./cmd/watchweaver
 
