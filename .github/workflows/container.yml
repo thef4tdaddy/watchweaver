@@ -24,6 +24,7 @@ jobs:
           tags: watchweaver:test
       - name: Verify startup, readiness, persistence, and backup
         run: |
+          docker run --rm --entrypoint sh watchweaver:test -c 'test ! -e /.env && test ! -e /src && test ! -e /data/watchweaver.db'
           docker volume create watchweaver-ci
           docker run -d --name watchweaver-ci -p 18080:8080 -v watchweaver-ci:/data watchweaver:test
           for attempt in $(seq 1 30); do
