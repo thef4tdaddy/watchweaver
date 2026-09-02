@@ -296,3 +296,53 @@ func TestAPIRoutesDoNotBreakHealthOrSPAFallback(t *testing.T) {
 		t.Fatalf("unknown API should not fall through to SPA: %d", rr.Code)
 	}
 }
+
+func TestLetterboxdBatchAPIWorkflow(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	if _, err := f.db.Exec(`INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,'tmdb','500')`, f.movieID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`INSERT INTO ratings(media_id,rating,source) VALUES(?,8,'local')`, f.movieID); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.request(http.MethodGet, "/api/letterboxd", "")
+	if rr.Code != http.StatusOK || decodeMap(t, rr)["pending_events"] != float64(2) {
+		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodPost, "/api/letterboxd/batches", "")
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("generate: %d %s", rr.Code, rr.Body.String())
+	}
+	batch := decodeMap(t, rr)
+	id := int64(batch["id"].(float64))
+	files := batch["files"].([]any)
+	if len(files) != 1 {
+		t.Fatalf("files=%#v", files)
+	}
+	rr = f.request(http.MethodGet, fmt.Sprintf("/api/letterboxd/batches/%d/files/1", id), "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Header().Get("Content-Type"), "text/csv") || !strings.Contains(rr.Header().Get("Content-Disposition"), ".csv") || !strings.Contains(rr.Body.String(), "500") {
+		t.Fatalf("download: %d %#v %s", rr.Code, rr.Header(), rr.Body.String())
+	}
+	rr = f.request(http.MethodGet, fmt.Sprintf("/api/letterboxd/batches/%d", id), "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("batch: %d", rr.Code)
+	}
+	rr = f.request(http.MethodGet, "/api/letterboxd/batches", "")
+	if rr.Code != http.StatusOK || len(decodeMap(t, rr)["items"].([]any)) != 1 {
+		t.Fatalf("batch list: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodPost, fmt.Sprintf("/api/letterboxd/batches/%d/confirm", id), "")
+	if rr.Code != http.StatusOK || decodeMap(t, rr)["state"] != "confirmed" {
+		t.Fatalf("confirm: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodGet, "/api/letterboxd", "")
+	if decodeMap(t, rr)["pending_rows"] != float64(0) {
+		t.Fatalf("still pending: %s", rr.Body.String())
+	}
+	if rr = f.request(http.MethodPost, "/api/letterboxd/batches", ""); rr.Code != http.StatusConflict {
+		t.Fatalf("empty generation: %d", rr.Code)
+	}
+	if rr = f.request(http.MethodGet, "/api/letterboxd/batches/999", ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("missing batch: %d", rr.Code)
+	}
+}

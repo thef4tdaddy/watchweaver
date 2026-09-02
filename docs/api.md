@@ -41,3 +41,16 @@ updating either replaces its current value without changing watch history.
 
 The public Trakt authorization response includes only its state and, while
 pending, the user code and verification URL needed by the user.
+
+## Letterboxd exports
+
+- `GET /api/letterboxd` returns pending row/event and duplicate-warning counts.
+- `GET /api/letterboxd/batches` lists generated and confirmed batches.
+- `POST /api/letterboxd/batches` generates a logical batch in one or more CSV files.
+- `GET /api/letterboxd/batches/{id}` returns batch state, warnings, and file metadata.
+- `GET /api/letterboxd/batches/{id}/files/{part}` downloads a CSV part.
+- `POST /api/letterboxd/batches/{id}/confirm` records explicit user confirmation.
+
+Generating or downloading CSV never confirms an import. Generated batches stay
+regeneratable until the user confirms one. CSV dates use the configured timezone,
+and each file remains below Letterboxd's 1 MB limit.
