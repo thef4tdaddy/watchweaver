@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thef4tdaddy/watchweaver/internal/credentials"
+	"github.com/thef4tdaddy/watchweaver/internal/discord"
 	"github.com/thef4tdaddy/watchweaver/internal/letterboxd"
 	"github.com/thef4tdaddy/watchweaver/internal/ratings"
 	"github.com/thef4tdaddy/watchweaver/internal/serializd"
@@ -26,10 +28,14 @@ type API struct {
 	letterboxd        *letterboxd.Service
 	serializd         *serializd.Service
 	trakt             *trakt.Service
+	credentials       *credentials.Store
+	discord           *discord.Notifier
 	discordConfigured bool
 }
 
-func (a *API) SetDiscordConfigured(configured bool) { a.discordConfigured = configured }
+func (a *API) SetDiscordConfigured(configured bool)          { a.discordConfigured = configured }
+func (a *API) SetCredentialStore(store *credentials.Store)   { a.credentials = store }
+func (a *API) SetDiscordNotifier(notifier *discord.Notifier) { a.discord = notifier }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
 	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService}
@@ -80,8 +86,12 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/media/", a.mediaResource)
 	mux.HandleFunc("/api/settings", a.settings)
 	mux.HandleFunc("/api/integrations", a.integrationStatus)
+	mux.HandleFunc("/api/setup", a.setupStatus)
+	mux.HandleFunc("/api/integrations/trakt/config", a.traktConfig)
 	mux.HandleFunc("/api/integrations/trakt/authorize", a.traktAuthorize)
 	mux.HandleFunc("/api/integrations/trakt/authorize/poll", a.traktPoll)
+	mux.HandleFunc("/api/integrations/discord/config", a.discordConfig)
+	mux.HandleFunc("/api/integrations/discord/test", a.discordTest)
 	mux.HandleFunc("/api/letterboxd", a.letterboxdStatus)
 	mux.HandleFunc("/api/letterboxd/batches", a.letterboxdGenerate)
 	mux.HandleFunc("/api/letterboxd/batches/", a.letterboxdBatch)
@@ -618,6 +628,9 @@ func (a *API) review(w http.ResponseWriter, r *http.Request, id int64) {
 
 type settingsJSON struct {
 	Timezone                 string `json:"timezone"`
+	TraktPollMinutes         int    `json:"trakt_poll_minutes"`
+	PromptMoviesEnabled      bool   `json:"prompt_movies_enabled"`
+	PromptTVEnabled          bool   `json:"prompt_tv_enabled"`
 	SerializdEnabled         bool   `json:"serializd_enabled"`
 	SerializdReminderChanges int    `json:"serializd_reminder_changes"`
 	SerializdReminderDays    int    `json:"serializd_reminder_days"`
@@ -645,13 +658,17 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, "reminder thresholds must be positive")
 			return
 		}
+		if body.TraktPollMinutes < 1 || body.TraktPollMinutes > 1440 {
+			badRequest(w, "Trakt polling must be between 1 and 1440 minutes")
+			return
+		}
 		tx, err := a.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			internalError(w)
 			return
 		}
 		defer tx.Rollback()
-		values := map[string]string{"timezone": body.Timezone, "serializd_enabled": strconv.FormatBool(body.SerializdEnabled), "serializd_reminder_changes": strconv.Itoa(body.SerializdReminderChanges), "serializd_reminder_days": strconv.Itoa(body.SerializdReminderDays)}
+		values := map[string]string{"timezone": body.Timezone, "trakt_poll_minutes": strconv.Itoa(body.TraktPollMinutes), "prompt_movies_enabled": strconv.FormatBool(body.PromptMoviesEnabled), "prompt_tv_enabled": strconv.FormatBool(body.PromptTVEnabled), "serializd_enabled": strconv.FormatBool(body.SerializdEnabled), "serializd_reminder_changes": strconv.Itoa(body.SerializdReminderChanges), "serializd_reminder_days": strconv.Itoa(body.SerializdReminderDays)}
 		for key, value := range values {
 			if _, err = tx.ExecContext(r.Context(), `INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, key, value); err != nil {
 				internalError(w)
@@ -668,8 +685,8 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *API) loadSettings(ctx context.Context) (settingsJSON, error) {
-	out := settingsJSON{Timezone: "UTC", SerializdReminderChanges: 20, SerializdReminderDays: 14}
-	rows, err := a.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('timezone','serializd_enabled','serializd_reminder_changes','serializd_reminder_days')`)
+	out := settingsJSON{Timezone: "UTC", TraktPollMinutes: 5, PromptMoviesEnabled: true, PromptTVEnabled: true, SerializdReminderChanges: 20, SerializdReminderDays: 14}
+	rows, err := a.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('timezone','trakt_poll_minutes','prompt_movies_enabled','prompt_tv_enabled','serializd_enabled','serializd_reminder_changes','serializd_reminder_days')`)
 	if err != nil {
 		return out, err
 	}
@@ -682,6 +699,12 @@ func (a *API) loadSettings(ctx context.Context) (settingsJSON, error) {
 		switch k {
 		case "timezone":
 			out.Timezone = v
+		case "trakt_poll_minutes":
+			out.TraktPollMinutes, _ = strconv.Atoi(v)
+		case "prompt_movies_enabled":
+			out.PromptMoviesEnabled, _ = strconv.ParseBool(v)
+		case "prompt_tv_enabled":
+			out.PromptTVEnabled, _ = strconv.ParseBool(v)
 		case "serializd_enabled":
 			out.SerializdEnabled, _ = strconv.ParseBool(v)
 		case "serializd_reminder_changes":
@@ -712,7 +735,11 @@ func (a *API) integrationStatus(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": a.discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[a.discordConfigured]}})
+	discordConfigured := a.discordConfigured
+	if a.discord != nil {
+		discordConfigured = a.discord.Configured()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[discordConfigured]}})
 }
 func (a *API) traktAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

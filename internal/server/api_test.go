@@ -13,6 +13,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/thef4tdaddy/watchweaver/internal/credentials"
+	"github.com/thef4tdaddy/watchweaver/internal/discord"
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
 )
@@ -238,11 +240,11 @@ func TestSettingsDefaultsUpdateValidationAndSecretRedaction(t *testing.T) {
 	if body["timezone"] != "UTC" || body["serializd_reminder_changes"] != float64(20) {
 		t.Fatalf("defaults: %#v", body)
 	}
-	rr = f.request(http.MethodPut, "/api/settings", `{"timezone":"America/Chicago","serializd_enabled":true,"serializd_reminder_changes":10,"serializd_reminder_days":7}`)
+	rr = f.request(http.MethodPut, "/api/settings", `{"timezone":"America/Chicago","trakt_poll_minutes":10,"prompt_movies_enabled":true,"prompt_tv_enabled":false,"serializd_enabled":true,"serializd_reminder_changes":10,"serializd_reminder_days":7}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("settings: %d %s", rr.Code, rr.Body.String())
 	}
-	if rr = f.request(http.MethodPut, "/api/settings", `{"timezone":"Mars/Olympus","serializd_enabled":true,"serializd_reminder_changes":10,"serializd_reminder_days":7}`); rr.Code != http.StatusBadRequest {
+	if rr = f.request(http.MethodPut, "/api/settings", `{"timezone":"Mars/Olympus","trakt_poll_minutes":5,"prompt_movies_enabled":true,"prompt_tv_enabled":true,"serializd_enabled":true,"serializd_reminder_changes":10,"serializd_reminder_days":7}`); rr.Code != http.StatusBadRequest {
 		t.Fatalf("invalid timezone: %d", rr.Code)
 	}
 	_, _ = f.db.Exec(`INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','access_token','super-secret'),('trakt','refresh_token','also-secret')`)
@@ -352,7 +354,7 @@ func TestLetterboxdBatchAPIWorkflow(t *testing.T) {
 
 func TestSerializdStatusAndMarkSyncedAPI(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	rr := f.request(http.MethodPut, "/api/settings", `{"timezone":"UTC","serializd_enabled":true,"serializd_reminder_changes":1,"serializd_reminder_days":14}`)
+	rr := f.request(http.MethodPut, "/api/settings", `{"timezone":"UTC","trakt_poll_minutes":5,"prompt_movies_enabled":true,"prompt_tv_enabled":true,"serializd_enabled":true,"serializd_reminder_changes":1,"serializd_reminder_days":14}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("settings: %d %s", rr.Code, rr.Body.String())
 	}
@@ -374,5 +376,67 @@ func TestSerializdStatusAndMarkSyncedAPI(t *testing.T) {
 	}
 	if rr = f.request(http.MethodGet, "/api/integrations", ""); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"serializd":{"enabled":true`) {
 		t.Fatalf("integration: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUIManagedEncryptedIntegrationConfiguration(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	store, err := credentials.Open(f.db, filepath.Join(t.TempDir(), "credential.key"), credentials.Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := trakt.NewService(f.db, trakt.Config{SecretStore: store})
+	f.api.trakt = service
+	f.api.SetCredentialStore(store)
+	requests := 0
+	notifier := discord.NewNotifier(f.db, discord.Options{HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}})
+	f.api.SetDiscordNotifier(notifier)
+
+	rr := f.request(http.MethodGet, "/api/setup", "")
+	if rr.Code != http.StatusOK || decodeMap(t, rr)["complete"] != false {
+		t.Fatalf("setup=%d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodPut, "/api/integrations/trakt/config", `{"client_id":"public-id","client_secret":"private-secret"}`)
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "private-secret") {
+		t.Fatalf("trakt config=%d %s", rr.Code, rr.Body.String())
+	}
+	var encrypted []byte
+	if err := f.db.QueryRow(`SELECT ciphertext FROM encrypted_credentials WHERE integration='trakt' AND credential_key='client_secret'`).Scan(&encrypted); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encrypted), "private-secret") {
+		t.Fatal("credential stored in plaintext")
+	}
+	rr = f.request(http.MethodPut, "/api/integrations/discord/config", `{"webhook_url":"https://discord.invalid/api/webhooks/example/value","enabled":true}`)
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "webhooks") {
+		t.Fatalf("discord config=%d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodPost, "/api/integrations/discord/test", "")
+	if rr.Code != http.StatusOK || requests != 1 {
+		t.Fatalf("discord test=%d requests=%d", rr.Code, requests)
+	}
+	rr = f.request(http.MethodGet, "/api/setup", "")
+	if strings.Contains(rr.Body.String(), "public-id") || strings.Contains(rr.Body.String(), "private-secret") || strings.Contains(rr.Body.String(), "webhooks") {
+		t.Fatalf("setup leaked secret: %s", rr.Body.String())
+	}
+}
+
+func TestEnvironmentCredentialOverridesAreLocked(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	store, err := credentials.Open(f.db, filepath.Join(t.TempDir(), "credential.key"), credentials.Overrides{TraktClientID: "env-id", TraktClientSecret: "env-secret", DiscordWebhookURL: "https://discord.invalid/env"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.api.SetCredentialStore(store)
+	f.api.trakt = trakt.NewService(f.db, trakt.Config{ClientID: "env-id", ClientSecret: "env-secret", SecretStore: store})
+	f.api.SetDiscordNotifier(discord.NewNotifier(f.db, discord.Options{WebhookURL: "https://discord.invalid/env"}))
+	if rr := f.request(http.MethodPut, "/api/integrations/trakt/config", `{"client_id":"replace","client_secret":"replace"}`); rr.Code != http.StatusConflict {
+		t.Fatalf("trakt override=%d", rr.Code)
+	}
+	if rr := f.request(http.MethodDelete, "/api/integrations/discord/config", ""); rr.Code != http.StatusConflict {
+		t.Fatalf("discord override=%d", rr.Code)
 	}
 }

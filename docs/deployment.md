@@ -93,6 +93,8 @@ Examples include:
 - bootstrap integration credentials/secrets where appropriate
 - reverse-proxy/base-URL related settings where needed
 
+Trakt and Discord credentials are normally entered through the first-run web wizard. WatchWeaver generates a 256-bit credential-encryption key at `/data/.watchweaver.key` with owner-only permissions and stores only AES-GCM ciphertext in SQLite. Existing environment variables remain optional administrator overrides; overridden fields are locked in the UI.
+
 For the bootstrap HTTP server, v0.1 defines:
 
 - `WATCHWEAVER_LISTEN_ADDR` with default `:8080`
@@ -177,13 +179,13 @@ Create a consistent online backup with the application command:
 docker compose exec watchweaver watchweaver backup
 ```
 
-The default filename is UTC timestamped beneath `/data/backups`. An explicit destination beneath the persistent volume can be supplied as the second argument. Existing files are never overwritten.
+The default filename is UTC timestamped beneath `/data/backups`. An explicit destination beneath the persistent volume can be supplied as the second argument. Existing files are never overwritten. When UI-managed credentials exist, the command also writes a mode-0600 companion `<backup>.key`; both files are required for a fresh-volume restore.
 
 ### Restore procedure
 
 1. Stop the service with `docker compose down`.
 2. Retain the current database until the backup has been verified.
-3. Inside the `watchweaver-data` volume, copy the selected consistent backup to `/data/watchweaver.db` and remove stale `watchweaver.db-wal` and `watchweaver.db-shm` sidecars.
+3. Inside the `watchweaver-data` volume, copy the selected consistent backup to `/data/watchweaver.db`, copy its companion key to `/data/.watchweaver.key`, set both files to runtime user ownership with key mode `0600`, and remove stale `watchweaver.db-wal` and `watchweaver.db-shm` sidecars.
 4. Start the same application version that created the backup, or a documented compatible newer version, with `docker compose up -d`.
 5. Wait for `/readyz` and verify history and settings in the dashboard.
 

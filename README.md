@@ -58,12 +58,10 @@ Trakt is intended to provide automated viewing activity. WatchWeaver maintains i
 ```bash
 git clone https://github.com/thef4tdaddy/watchweaver.git
 cd watchweaver
-cp .env.example .env
-# Add your own Trakt client credentials to .env, then:
 docker compose up -d
 ```
 
-Open `http://localhost:8080`. Compose stores the database, backups, and retained exports in the named `watchweaver-data` volume. Pin `ghcr.io/thef4tdaddy/watchweaver:<version>` in `compose.yaml` for predictable production upgrades.
+Open `http://localhost:8080` and follow the first-run wizard to enter Trakt credentials, authorize the account, and optionally configure Discord. No `.env` file is required for normal setup. Compose stores the database, generated credential-encryption key, backups, and retained exports in the named `watchweaver-data` volume. Pin `ghcr.io/thef4tdaddy/watchweaver:<version>` in `compose.yaml` for predictable production upgrades.
 
 Published container channels are `beta` for prerelease testing and `latest` for stable releases. Immutable tags such as `0.1.0-beta.1` or `0.1.0` are recommended when you want upgrades to be explicit.
 
@@ -75,7 +73,7 @@ Create a consistent live SQLite backup without stopping the service:
 docker compose exec watchweaver watchweaver backup
 ```
 
-Backups are written beneath `/data/backups`. To restore, first stop WatchWeaver, copy a known-good backup over `/data/watchweaver.db` inside the persistent volume, remove any old `watchweaver.db-wal` and `watchweaver.db-shm` files, and restart the same or a compatible newer image. Never replace the database while WatchWeaver is running.
+Backups are written beneath `/data/backups`; the companion `.key` file is required to decrypt saved integration credentials. To restore, first stop WatchWeaver, copy a known-good backup over `/data/watchweaver.db`, restore its companion key as `/data/.watchweaver.key`, remove any old `watchweaver.db-wal` and `watchweaver.db-shm` files, and restart the same or a compatible newer image. Never replace the database while WatchWeaver is running.
 
 ### Upgrade
 

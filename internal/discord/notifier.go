@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/serializd"
@@ -26,11 +27,28 @@ type Options struct {
 
 type Notifier struct {
 	db         *sql.DB
+	mu         sync.RWMutex
 	webhookURL string
 	httpClient *http.Client
 	interval   time.Duration
 	now        func() time.Time
 	serializd  *serializd.Service
+}
+
+func (n *Notifier) Configure(webhookURL string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.webhookURL = strings.TrimSpace(webhookURL)
+}
+
+func (n *Notifier) Configured() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.webhookURL != ""
+}
+
+func (n *Notifier) Test(ctx context.Context) error {
+	return n.send(ctx, "WatchWeaver connection test succeeded. Discord announcements are ready.")
 }
 
 func NewNotifier(db *sql.DB, options Options) *Notifier {
@@ -63,7 +81,7 @@ func (n *Notifier) Run(ctx context.Context) error {
 }
 
 func (n *Notifier) Poll(ctx context.Context) error {
-	if n.webhookURL == "" {
+	if !n.Configured() {
 		return nil
 	}
 	if err := n.pollTasks(ctx); err != nil {
@@ -237,11 +255,17 @@ func (e *webhookError) Error() string {
 	return fmt.Sprintf("Discord webhook returned HTTP %d", e.status)
 }
 func (n *Notifier) send(ctx context.Context, content string) error {
+	n.mu.RLock()
+	webhookURL := n.webhookURL
+	n.mu.RUnlock()
+	if webhookURL == "" {
+		return fmt.Errorf("Discord webhook is not configured")
+	}
 	body, err := json.Marshal(map[string]string{"content": content})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.webhookURL+"?wait=true", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL+"?wait=true", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

@@ -206,27 +206,43 @@ func (s *RatingSync) matchRating(ctx context.Context, item remoteRating) (int64,
 	var ids map[string]any
 	switch item.Type {
 	case "movie":
-		if item.Movie != nil { ids = item.Movie.IDs }
+		if item.Movie != nil {
+			ids = item.Movie.IDs
+		}
 	case "episode":
-		if item.Episode != nil { ids = item.Episode.IDs }
+		if item.Episode != nil {
+			ids = item.Episode.IDs
+		}
 	case "season":
-		if item.Season != nil { ids = item.Season.IDs }
+		if item.Season != nil {
+			ids = item.Season.IDs
+		}
 	default:
 		return 0, nil
 	}
 	if traktID, ok := stringID(ids["trakt"]); ok {
 		var id int64
 		err := s.db.QueryRowContext(ctx, `SELECT media_id FROM external_ids WHERE provider='trakt' AND external_id=?`, traktID).Scan(&id)
-		if err == nil { return id, nil }
-		if err != sql.ErrNoRows { return 0, err }
+		if err == nil {
+			return id, nil
+		}
+		if err != sql.ErrNoRows {
+			return 0, err
+		}
 	}
 	if item.Type == "season" && item.Show != nil && item.Season != nil {
 		showTrakt, ok := stringID(item.Show.IDs["trakt"])
-		if !ok { return 0, nil }
+		if !ok {
+			return 0, nil
+		}
 		var id int64
 		err := s.db.QueryRowContext(ctx, `SELECT s.id FROM media_items s JOIN external_ids x ON x.media_id=s.parent_id AND x.provider='trakt' WHERE s.media_type='season' AND s.season_number=? AND x.external_id=?`, item.Season.Number, showTrakt).Scan(&id)
-		if err == sql.ErrNoRows { return 0, nil }
-		if err != nil { return 0, err }
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, err
+		}
 		if seasonTrakt, ok := stringID(item.Season.IDs["trakt"]); ok {
 			_, _ = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO external_ids(media_id,provider,external_id) VALUES(?,'trakt',?)`, id, seasonTrakt)
 		}
@@ -238,73 +254,118 @@ func (s *RatingSync) matchRating(ctx context.Context, item remoteRating) (int64,
 func (s *RatingSync) applyRemote(ctx context.Context, mediaID int64, value int, ratedAt time.Time) error {
 	remoteAt := ratedAt.UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 	var lastLocal, lastRemote sql.NullString
 	var pending sql.NullInt64
 	var pendingDelete int
 	err = tx.QueryRowContext(ctx, `SELECT last_local_change_at,last_remote_change_at,pending_rating,pending_delete FROM rating_sync_state WHERE media_id=?`, mediaID).Scan(&lastLocal, &lastRemote, &pending, &pendingDelete)
-	if err != nil && err != sql.ErrNoRows { return err }
-	if lastRemote.Valid && remoteAt <= lastRemote.String { return tx.Commit() }
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if lastRemote.Valid && remoteAt <= lastRemote.String {
+		return tx.Commit()
+	}
 	if lastLocal.Valid && remoteAt <= lastLocal.String {
 		if pending.Valid && int(pending.Int64) == value {
 			_, err = tx.ExecContext(ctx, `UPDATE rating_sync_state SET last_remote_change_at=?,last_remote_rating=?,pending_rating=NULL,pending_delete=0,attempt_count=0,next_attempt_at=NULL,last_error=NULL,updated_at=? WHERE media_id=?`, remoteAt, value, remoteAt, mediaID)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 		}
 		return tx.Commit()
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO ratings(media_id,rating,source,remote_updated_at,local_updated_at) VALUES(? ,?,'trakt',?,?) ON CONFLICT(media_id) DO UPDATE SET rating=excluded.rating,source='trakt',remote_updated_at=excluded.remote_updated_at,local_updated_at=excluded.local_updated_at`, mediaID, value, remoteAt, remoteAt)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO rating_sync_state(media_id,last_remote_change_at,last_remote_rating,updated_at) VALUES(?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET last_remote_change_at=excluded.last_remote_change_at,last_remote_rating=excluded.last_remote_rating,pending_rating=NULL,pending_delete=0,attempt_count=0,next_attempt_at=NULL,last_error=NULL,updated_at=excluded.updated_at`, mediaID, remoteAt, value, remoteAt)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
 func (s *RatingSync) flushOne(ctx context.Context, mediaID int64, rating sql.NullInt64, deleting bool, attempt int) error {
 	mediaType, traktID, err := s.outboundIdentity(ctx, mediaID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	item := map[string]any{"ids": map[string]string{"trakt": traktID}}
-	if rating.Valid { item["rating"] = rating.Int64 }
+	if rating.Valid {
+		item["rating"] = rating.Int64
+	}
 	payload := map[string]any{mediaType + "s": []any{item}}
 	path := "/sync/ratings"
-	if deleting { path += "/remove" }
+	if deleting {
+		path += "/remove"
+	}
 	req, err := s.request(ctx, http.MethodPost, path, payload)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	resp, err := s.httpClient.Do(req)
-	if err != nil { return s.recordFailure(ctx, mediaID, attempt, err.Error(), 0) }
+	if err != nil {
+		return s.recordFailure(ctx, mediaID, attempt, err.Error(), 0)
+	}
 	io.Copy(io.Discard, io.LimitReader(resp.Body, maxRatingResponseBytes))
 	resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		retryAfter := 0
-		if raw := resp.Header.Get("Retry-After"); raw != "" { retryAfter, _ = strconv.Atoi(raw) }
+		if raw := resp.Header.Get("Retry-After"); raw != "" {
+			retryAfter, _ = strconv.Atoi(raw)
+		}
 		return s.recordFailure(ctx, mediaID, attempt, fmt.Sprintf("Trakt HTTP %d", resp.StatusCode), retryAfter)
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	var remote any
-	if rating.Valid { remote = rating.Int64 }
+	if rating.Valid {
+		remote = rating.Int64
+	}
 	_, err = s.db.ExecContext(ctx, `UPDATE rating_sync_state SET last_remote_change_at=?,last_remote_rating=?,pending_rating=NULL,pending_delete=0,attempt_count=0,next_attempt_at=NULL,last_error=NULL,updated_at=? WHERE media_id=?`, now, remote, now, mediaID)
 	return err
 }
 
 func (s *RatingSync) outboundIdentity(ctx context.Context, mediaID int64) (string, string, error) {
 	var mediaType string
-	if err := s.db.QueryRowContext(ctx, `SELECT media_type FROM media_items WHERE id=?`, mediaID).Scan(&mediaType); err != nil { return "", "", err }
-	if mediaType != "movie" && mediaType != "season" && mediaType != "episode" { return "", "", fmt.Errorf("unsupported rating target %q", mediaType) }
+	if err := s.db.QueryRowContext(ctx, `SELECT media_type FROM media_items WHERE id=?`, mediaID).Scan(&mediaType); err != nil {
+		return "", "", err
+	}
+	if mediaType != "movie" && mediaType != "season" && mediaType != "episode" {
+		return "", "", fmt.Errorf("unsupported rating target %q", mediaType)
+	}
 	var traktID string
-	if err := s.db.QueryRowContext(ctx, `SELECT external_id FROM external_ids WHERE media_id=? AND provider='trakt'`, mediaID).Scan(&traktID); err != nil { return "", "", fmt.Errorf("rating target missing Trakt id: %w", err) }
+	if err := s.db.QueryRowContext(ctx, `SELECT external_id FROM external_ids WHERE media_id=? AND provider='trakt'`, mediaID).Scan(&traktID); err != nil {
+		return "", "", fmt.Errorf("rating target missing Trakt id: %w", err)
+	}
 	return mediaType, traktID, nil
 }
 
 func (s *RatingSync) recordFailure(ctx context.Context, mediaID int64, attempt int, message string, retryAfter int) error {
 	attempt++
 	delay := time.Second << min(attempt-1, 6)
-	if retryAfter > 0 && time.Duration(retryAfter)*time.Second > delay { delay = time.Duration(retryAfter) * time.Second }
-	if delay > time.Hour { delay = time.Hour }
+	if retryAfter > 0 && time.Duration(retryAfter)*time.Second > delay {
+		delay = time.Duration(retryAfter) * time.Second
+	}
+	if delay > time.Hour {
+		delay = time.Hour
+	}
 	next := s.now().UTC().Add(delay).Format(time.RFC3339Nano)
-	if len(message) > 256 { message = message[:256] }
+	if len(message) > 256 {
+		message = message[:256]
+	}
 	_, err := s.db.ExecContext(ctx, `UPDATE rating_sync_state SET attempt_count=?,next_attempt_at=?,last_error=?,updated_at=? WHERE media_id=?`, attempt, next, message, s.now().UTC().Format(time.RFC3339Nano), mediaID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return fmt.Errorf("sync rating: %s", message)
 }
 
-func min(a, b int) int { if a < b { return a }; return b }
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

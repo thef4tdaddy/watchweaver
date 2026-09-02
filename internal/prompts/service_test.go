@@ -113,3 +113,26 @@ func TestServiceApplyAllowsNewMoviePromptAfterCompletedPriorTask(t *testing.T) {
 		t.Fatalf("pending=%d, want 1", pending)
 	}
 }
+
+func TestServiceApplyHonorsPromptPreferences(t *testing.T) {
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "preferences.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	result, err := db.Exec(`INSERT INTO media_items(media_type,title,year) VALUES('movie','Disabled',2026)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movieID, _ := result.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO app_settings(setting_key,setting_value) VALUES('prompt_movies_enabled','false'),('prompt_tv_enabled','true')`); err != nil {
+		t.Fatal(err)
+	}
+	created, err := NewService(db).Apply(context.Background(), Batch{NewMovieWatches: []int64{movieID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("disabled movie prompts created=%v", created)
+	}
+}

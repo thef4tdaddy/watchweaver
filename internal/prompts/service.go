@@ -16,6 +16,21 @@ func NewService(db *sql.DB) *Service {
 
 func (s *Service) Apply(ctx context.Context, batch Batch) ([]Decision, error) {
 	decisions := Evaluate(batch)
+	moviesEnabled, tvEnabled, err := s.preferences(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := decisions[:0]
+	for _, decision := range decisions {
+		if decision.Kind == MovieRating && !moviesEnabled {
+			continue
+		}
+		if decision.Kind != MovieRating && !tvEnabled {
+			continue
+		}
+		filtered = append(filtered, decision)
+	}
+	decisions = filtered
 	if len(decisions) == 0 {
 		return decisions, nil
 	}
@@ -40,6 +55,28 @@ func (s *Service) Apply(ctx context.Context, batch Batch) ([]Decision, error) {
 		return nil, err
 	}
 	return created, nil
+}
+
+func (s *Service) preferences(ctx context.Context) (bool, bool, error) {
+	movies, tv := true, true
+	rows, err := s.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('prompt_movies_enabled','prompt_tv_enabled')`)
+	if err != nil {
+		return false, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return false, false, err
+		}
+		enabled := value == "true"
+		if key == "prompt_movies_enabled" {
+			movies = enabled
+		} else {
+			tv = enabled
+		}
+	}
+	return movies, tv, rows.Err()
 }
 
 func insertDecision(ctx context.Context, tx *sql.Tx, decision Decision) (bool, error) {

@@ -31,13 +31,20 @@ updating either replaces its current value without changing watch history.
 ## Configuration and integrations
 
 - `GET|PUT /api/settings` reads or replaces the v0.1 preferences: IANA
-  `timezone`, `serializd_enabled`, `serializd_reminder_changes`, and
-  `serializd_reminder_days`. Defaults are UTC, disabled, 20 changes, and 14 days.
+  `timezone`, `trakt_poll_minutes`, movie/TV prompt enablement, and Serializd
+  enablement/change/day thresholds.
+- `GET /api/setup` returns first-run completion and write-only configuration
+  status. It never returns credential values.
+- `PUT|DELETE /api/integrations/trakt/config` saves or removes encrypted Trakt
+  client credentials. Empty `PUT` fields retain their existing values.
 - `GET /api/integrations` returns public authorization and history-poll status
   only. Credentials, access tokens, refresh tokens, and device codes are never
   returned.
 - `POST /api/integrations/trakt/authorize` starts Trakt device authorization.
 - `POST /api/integrations/trakt/authorize/poll` advances pending authorization.
+- `PUT|DELETE /api/integrations/discord/config` saves encrypted write-only
+  webhook configuration and enablement.
+- `POST /api/integrations/discord/test` sends an explicit test announcement.
 
 The public Trakt authorization response includes only its state and, while
 pending, the user code and verification URL needed by the user.
@@ -66,8 +73,9 @@ false when Serializd is disabled or when no transferable changes are pending.
 
 ## Discord announcements
 
-Discord is an optional, outbound-only integration configured with the
-`DISCORD_WEBHOOK_URL` environment variable. Integration status exposes only a
-configured/disabled boolean state; the webhook URL is never returned. Delivery
+Discord is an optional, outbound-only integration normally configured through
+the web UI. `DISCORD_WEBHOOK_URL` remains an optional administrator override
+that locks the UI field. Integration status exposes only a configured/disabled
+boolean state; the webhook URL is never returned. Delivery
 state and conservative retry metadata are persisted for prompt summaries and
 Serializd due-transition announcements. Discord provides no interactive controls.

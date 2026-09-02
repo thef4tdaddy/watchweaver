@@ -18,8 +18,8 @@ import (
 func TestHistoryImporterPaginationHierarchyAndBaseline(t *testing.T) {
 	db := testHistoryDB(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer token" {
-			t.Errorf("missing bearer token")
+		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("trakt-api-version") != "2" || r.Header.Get("trakt-api-key") != "client" {
+			t.Errorf("missing Trakt authorization headers")
 		}
 		page := r.URL.Query().Get("page")
 		w.Header().Set("X-Pagination-Page-Count", "2")
@@ -33,6 +33,7 @@ func TestHistoryImporterPaginationHierarchyAndBaseline(t *testing.T) {
 	defer server.Close()
 
 	imp := NewHistoryImporter(db, server.URL, server.Client(), "token")
+	imp.SetClientID("client")
 	got, err := imp.ImportInitial(context.Background())
 	if err != nil {
 		t.Fatal(err)

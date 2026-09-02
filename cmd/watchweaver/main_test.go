@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 	"github.com/thef4tdaddy/watchweaver/internal/server"
@@ -21,6 +23,23 @@ func TestInitializeMarksReadinessOnSuccess(t *testing.T) {
 
 	if !readiness.IsReady() {
 		t.Fatal("expected readiness true after successful initialization")
+	}
+}
+
+func TestApplicationPollIntervalUsesPersistedPreference(t *testing.T) {
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "poll.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if got := applicationPollInterval(context.Background(), db, 9*time.Minute); got != 9*time.Minute {
+		t.Fatalf("default=%v", got)
+	}
+	if _, err := db.Exec(`INSERT INTO app_settings(setting_key,setting_value) VALUES('trakt_poll_minutes','17')`); err != nil {
+		t.Fatal(err)
+	}
+	if got := applicationPollInterval(context.Background(), db, 9*time.Minute); got != 17*time.Minute {
+		t.Fatalf("persisted=%v", got)
 	}
 }
 
