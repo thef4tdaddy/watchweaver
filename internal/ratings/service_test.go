@@ -12,7 +12,7 @@ import (
 
 func testService(t *testing.T) (*Service, int64, int64) {
 	t.Helper()
-	db, err := persistence.OpenAndMigrate(context.Background(), filepath.Join(t.TempDir(), "ratings.db"))
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "ratings.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
