@@ -3,6 +3,7 @@ package trakt
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -36,6 +37,7 @@ type Poller struct {
 }
 
 type PollStatus struct {
+	Phase               string     `json:"phase,omitempty"`
 	LastSuccess         *time.Time `json:"last_success,omitempty"`
 	LastError           string     `json:"last_error,omitempty"`
 	ConsecutiveFailures int        `json:"consecutive_failures"`
@@ -117,7 +119,12 @@ func (p *Poller) Poll(ctx context.Context) error {
 			return err
 		}
 		if attempt+1 < p.maxRetries {
-			if err := p.sleep(ctx, time.Second<<attempt); err != nil {
+			delay := time.Second << attempt
+			var retryable *RetryableError
+			if errors.As(lastErr, &retryable) && retryable.RetryAfter > delay {
+				delay = retryable.RetryAfter
+			}
+			if err := p.sleep(ctx, delay); err != nil {
 				return err
 			}
 		}
@@ -153,6 +160,9 @@ func (p *Poller) set(ctx context.Context, key, value string) error {
 func (p *Poller) Status(ctx context.Context) (PollStatus, error) {
 	var status PollStatus
 	var raw string
+	if err := p.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='history_sync_phase'`).Scan(&status.Phase); err != nil && err != sql.ErrNoRows {
+		return status, err
+	}
 
 	err := p.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='history_poll_last_success'`).Scan(&raw)
 	if err == nil {

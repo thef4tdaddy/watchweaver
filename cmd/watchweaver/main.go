@@ -50,19 +50,18 @@ func startTraktPoller(ctx context.Context, db *sql.DB, cfg config.Config) {
 		return
 	}
 
-	var accessToken string
-	if err := db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='access_token'`).Scan(&accessToken); err != nil || accessToken == "" {
-		return
-	}
-
-	importer := trakt.NewHistoryImporter(db, cfg.TraktBaseURL, nil, accessToken)
-	poller := trakt.NewPoller(db, importer, trakt.PollerOptions{
-		Interval: cfg.TraktPollInterval,
-		Overlap:  cfg.TraktPollOverlap,
+	syncer := trakt.NewHistorySync(db, trakt.HistorySyncOptions{
+		Poller: trakt.PollerOptions{
+			Interval: cfg.TraktPollInterval,
+			Overlap:  cfg.TraktPollOverlap,
+		},
+		ImporterFactory: func(accessToken string) trakt.HistorySyncImporter {
+			return trakt.NewHistoryImporter(db, cfg.TraktBaseURL, nil, accessToken)
+		},
 	})
 
 	go func() {
-		if err := poller.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := syncer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("trakt history poller stopped: %v", err)
 		}
 	}()
