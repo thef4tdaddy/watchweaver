@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const ImportURL = "https://www.serializd.com/settings/import"
+const ImportURL = "https://www.serializd.com/trakt"
 
 type Options struct {
 	Enabled         bool

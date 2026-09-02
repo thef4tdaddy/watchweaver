@@ -426,7 +426,7 @@ func TestSerializdStatusAndMarkSyncedAPI(t *testing.T) {
 	}
 	rr = f.request(http.MethodGet, "/api/serializd", "")
 	body := decodeMap(t, rr)
-	if rr.Code != http.StatusOK || body["pending_changes"] != float64(1) || body["due"] != true || !strings.Contains(body["import_url"].(string), "serializd.com") {
+	if rr.Code != http.StatusOK || body["pending_changes"] != float64(1) || body["due"] != true || body["import_url"] != "https://www.serializd.com/trakt" {
 		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
 	}
 	rr = f.request(http.MethodPost, "/api/serializd/mark-synced", "")
