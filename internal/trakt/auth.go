@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,6 +27,13 @@ const (
 type Config struct {
 	ClientID, ClientSecret, BaseURL string
 	HTTPClient                      *http.Client
+	SecretStore                     SecretStore
+}
+
+type SecretStore interface {
+	Get(context.Context, string, string) (string, error)
+	Set(context.Context, string, string, string) error
+	Update(context.Context, string, map[string]string, func(context.Context, *sql.Tx) error) error
 }
 
 type PublicStatus struct {
@@ -55,6 +63,7 @@ type Service struct {
 	cfg     Config
 	mu      sync.Mutex
 	pending *DeviceCode
+	secrets SecretStore
 }
 
 func NewService(db *sql.DB, cfg Config) *Service {
@@ -64,7 +73,19 @@ func NewService(db *sql.DB, cfg Config) *Service {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.trakt.tv"
 	}
-	return &Service{db: db, cfg: cfg}
+	return &Service{db: db, cfg: cfg, secrets: cfg.SecretStore}
+}
+
+func (s *Service) Configure(clientID, clientSecret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	if clientID != s.cfg.ClientID || clientSecret != s.cfg.ClientSecret {
+		s.pending = nil
+	}
+	s.cfg.ClientID = clientID
+	s.cfg.ClientSecret = clientSecret
 }
 
 func (s *Service) Status(ctx context.Context) PublicStatus {
@@ -80,8 +101,7 @@ func (s *Service) status(ctx context.Context) PublicStatus {
 	if s.pending != nil {
 		return PublicStatus{Status: StatusPending, UserCode: s.pending.UserCode, VerificationURL: s.pending.VerificationURL}
 	}
-	var access string
-	err := s.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='access_token'`).Scan(&access)
+	access, err := s.secret(ctx, "access_token")
 	if err == nil && access != "" {
 		return PublicStatus{Status: StatusConnected}
 	}
@@ -147,9 +167,12 @@ func (s *Service) Poll(ctx context.Context) (PublicStatus, error) {
 }
 
 func (s *Service) Refresh(ctx context.Context) error {
-	var refresh string
-	if err := s.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='refresh_token'`).Scan(&refresh); err != nil {
+	refresh, err := s.secret(ctx, "refresh_token")
+	if err != nil {
 		return fmt.Errorf("load refresh token: %w", err)
+	}
+	if refresh == "" {
+		return errors.New("load refresh token: no refresh token stored")
 	}
 	var tok token
 	if err := s.post(ctx, "/oauth/token", map[string]string{"refresh_token": refresh, "client_id": s.cfg.ClientID, "client_secret": s.cfg.ClientSecret, "grant_type": "refresh_token", "redirect_uri": "urn:ietf:wg:oauth:2.0:oob"}, &tok); err != nil {
@@ -160,6 +183,12 @@ func (s *Service) Refresh(ctx context.Context) error {
 }
 
 func (s *Service) persistToken(ctx context.Context, tok token) error {
+	if s.secrets != nil {
+		return s.secrets.Update(ctx, "trakt", map[string]string{"access_token": tok.AccessToken, "refresh_token": tok.RefreshToken}, func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','reauth_required','0') ON CONFLICT(integration,state_key) DO UPDATE SET state_value='0',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
+			return err
+		})
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -172,6 +201,18 @@ func (s *Service) persistToken(ctx context.Context, tok token) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *Service) secret(ctx context.Context, key string) (string, error) {
+	if s.secrets != nil {
+		return s.secrets.Get(ctx, "trakt", key)
+	}
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key=?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return value, err
 }
 
 type remoteError struct{ Code int }

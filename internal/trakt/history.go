@@ -17,7 +17,11 @@ type HistoryImporter struct {
 	baseURL     string
 	httpClient  *http.Client
 	accessToken string
+	clientID    string
 }
+
+func (h *HistoryImporter) SetClientID(clientID string) { h.clientID = strings.TrimSpace(clientID) }
+
 type HistoryImportResult struct {
 	Imported         int
 	Skipped          int
@@ -140,6 +144,10 @@ func (h *HistoryImporter) fetchPage(ctx context.Context, page int, since time.Ti
 	if h.accessToken != "" {
 		req.Header.Set("Authorization", "Bearer "+h.accessToken)
 	}
+	if h.clientID != "" {
+		req.Header.Set("trakt-api-key", h.clientID)
+	}
+	req.Header.Set("trakt-api-version", "2")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.httpClient.Do(req)
 	if err != nil {

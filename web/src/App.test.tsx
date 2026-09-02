@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 const integrations={trakt:{authorization:{status:'connected'},poll:{phase:'polling',consecutive_failures:0}},letterboxd:{enabled:true,status:'available'},serializd:{enabled:true,status:'enabled'},discord:{enabled:false,status:'disabled'}}
-const settings={timezone:'UTC',serializd_enabled:true,serializd_reminder_changes:20,serializd_reminder_days:14}
+const settings={timezone:'UTC',trakt_poll_minutes:5,prompt_movies_enabled:true,prompt_tv_enabled:true,serializd_enabled:true,serializd_reminder_changes:20,serializd_reminder_days:14}
 const task={id:4,type:'rating_review',state:'pending',created_at:'2026-09-02T00:00:00Z',media:{id:9,type:'movie',title:'The Example',year:2026,external_ids:{trakt:'9'}}}
 function json(body:unknown,status=200){return Promise.resolve(new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}}))}
 

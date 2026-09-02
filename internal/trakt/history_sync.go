@@ -20,6 +20,8 @@ type HistorySyncOptions struct {
 	AuthorizationCheckInterval time.Duration
 	Sleep                      func(context.Context, time.Duration) error
 	ImporterFactory            func(accessToken string) HistorySyncImporter
+	AccessToken                func(context.Context) (string, error)
+	PollInterval               func(context.Context) time.Duration
 }
 
 type HistorySync struct {
@@ -28,6 +30,8 @@ type HistorySync struct {
 	authorizationCheckInterval time.Duration
 	sleep                      func(context.Context, time.Duration) error
 	importerFactory            func(string) HistorySyncImporter
+	accessTokenProvider        func(context.Context) (string, error)
+	pollIntervalProvider       func(context.Context) time.Duration
 }
 
 func NewHistorySync(db *sql.DB, options HistorySyncOptions) *HistorySync {
@@ -46,6 +50,8 @@ func NewHistorySync(db *sql.DB, options HistorySyncOptions) *HistorySync {
 		authorizationCheckInterval: options.AuthorizationCheckInterval,
 		sleep:                      options.Sleep,
 		importerFactory:            options.ImporterFactory,
+		accessTokenProvider:        options.AccessToken,
+		pollIntervalProvider:       options.PollInterval,
 	}
 }
 
@@ -89,13 +95,20 @@ func (s *HistorySync) Run(ctx context.Context) error {
 		}
 		poller := NewPoller(s.db, importer, s.pollerOptions)
 		_ = poller.Poll(ctx)
-		if err := s.sleep(ctx, s.pollerOptions.Interval); err != nil {
+		interval := s.pollerOptions.Interval
+		if s.pollIntervalProvider != nil {
+			interval = s.pollIntervalProvider(ctx)
+		}
+		if err := s.sleep(ctx, interval); err != nil {
 			return err
 		}
 	}
 }
 
 func (s *HistorySync) accessToken(ctx context.Context) (string, error) {
+	if s.accessTokenProvider != nil {
+		return s.accessTokenProvider(ctx)
+	}
 	var token string
 	err := s.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='access_token'`).Scan(&token)
 	if errors.Is(err, sql.ErrNoRows) {
