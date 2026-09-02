@@ -116,6 +116,7 @@ export type SerializdStatus = {
   pending_changes: number;
   pending_episode_watches: number;
   pending_rating_changes: number;
+  tracked_episode_watches: number;
   oldest_pending_at?: string;
   count_threshold_reached: boolean;
   elapsed_threshold_reached: boolean;

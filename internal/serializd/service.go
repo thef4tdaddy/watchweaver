@@ -21,6 +21,7 @@ type Status struct {
 	PendingChanges              int        `json:"pending_changes"`
 	PendingEpisodeWatches       int        `json:"pending_episode_watches"`
 	PendingRatingChanges        int        `json:"pending_rating_changes"`
+	TrackedEpisodeWatches       int        `json:"tracked_episode_watches"`
 	OldestPendingAt             *time.Time `json:"oldest_pending_at,omitempty"`
 	CountThresholdReached       bool       `json:"count_threshold_reached"`
 	ElapsedThresholdReached     bool       `json:"elapsed_threshold_reached"`
@@ -70,6 +71,9 @@ func (s *Service) Status(ctx context.Context, options Options) (Status, error) {
 			return Status{}, err
 		}
 		status.OldestPendingAt = &parsed
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_events w JOIN media_items m ON m.id=w.media_id WHERE m.media_type='episode' AND w.deleted_at IS NULL`).Scan(&status.TrackedEpisodeWatches); err != nil {
+		return Status{}, err
 	}
 	status.CountThresholdReached = status.PendingChanges > 0 && options.ReminderChanges > 0 && status.PendingChanges >= options.ReminderChanges
 	if status.PendingChanges > 0 && options.ReminderDays > 0 {

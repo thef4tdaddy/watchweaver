@@ -54,6 +54,13 @@ func TestBaselineAndSeasonActivityDoNotCount(t *testing.T) {
 	if status.PendingChanges != 0 || status.Due {
 		t.Fatalf("status=%+v", status)
 	}
+	if status.TrackedEpisodeWatches != 1 {
+		t.Fatalf("baseline history was not reported: %+v", status)
+	}
+	synced, err := NewService(db).MarkSynced(context.Background(), Options{Enabled: true, ReminderChanges: 1, ReminderDays: 1})
+	if err != nil || synced.LastConfirmedAt == nil {
+		t.Fatalf("zero-change baseline could not be confirmed: %+v err=%v", synced, err)
+	}
 }
 
 func TestElapsedThresholdRequiresPendingActivity(t *testing.T) {

@@ -66,15 +66,11 @@ func (m *SyncManager) Trigger() {
 }
 
 func (m *SyncManager) Run(ctx context.Context) error {
+	delay := m.nextDelay(ctx, m.interval(ctx))
 	for {
-		_ = m.SyncNow(ctx)
-		interval := DefaultPollInterval
-		if m.options.Interval != nil {
-			interval = m.options.Interval(ctx)
-		}
-		next := m.options.Now().UTC().Add(interval)
+		next := m.options.Now().UTC().Add(delay)
 		_ = m.set(ctx, "sync_next_run", next.Format(time.RFC3339Nano))
-		timer := time.NewTimer(interval)
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -83,7 +79,40 @@ func (m *SyncManager) Run(ctx context.Context) error {
 			timer.Stop()
 		case <-timer.C:
 		}
+		_ = m.SyncNow(ctx)
+		delay = m.interval(ctx)
 	}
+}
+
+func (m *SyncManager) interval(ctx context.Context) time.Duration {
+	interval := DefaultPollInterval
+	if m.options.Interval != nil {
+		interval = m.options.Interval(ctx)
+	}
+	if interval <= 0 {
+		return DefaultPollInterval
+	}
+	return interval
+}
+
+func (m *SyncManager) nextDelay(ctx context.Context, interval time.Duration) time.Duration {
+	if interval <= 0 {
+		interval = DefaultPollInterval
+	}
+	var raw string
+	err := m.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='sync_last_completed'`).Scan(&raw)
+	if err != nil {
+		return 0
+	}
+	completed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return 0
+	}
+	remaining := completed.Add(interval).Sub(m.options.Now().UTC())
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func (m *SyncManager) SyncNow(ctx context.Context) error {
