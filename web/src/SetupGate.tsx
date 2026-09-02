@@ -49,7 +49,10 @@ export default function SetupGate() {
             <button onClick={() => void refresh()}>Retry</button>
           </>
         ) : (
-          "Starting WatchWeaver…"
+          <div className="setup-splash">
+            <img src="/brand/watchweaver-splash.png" alt="WatchWeaver" />
+            <span>Starting WatchWeaver…</span>
+          </div>
         )}
       </div>
     );

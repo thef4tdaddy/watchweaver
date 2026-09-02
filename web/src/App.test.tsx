@@ -148,6 +148,10 @@ afterEach(() => {
 describe("WatchWeaver dashboard", () => {
   it("renders the actionable inbox and existing current rating", async () => {
     render(<App />);
+    expect(document.querySelector(".brand-mark")).toHaveAttribute(
+      "src",
+      "/brand/watchweaver-icon.png",
+    );
     expect(
       screen.getByRole("heading", { level: 1, name: "Inbox" }),
     ).toBeInTheDocument();
