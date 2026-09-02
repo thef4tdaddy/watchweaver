@@ -14,6 +14,7 @@ import (
 
 	"github.com/thef4tdaddy/watchweaver/internal/letterboxd"
 	"github.com/thef4tdaddy/watchweaver/internal/ratings"
+	"github.com/thef4tdaddy/watchweaver/internal/serializd"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
 )
 
@@ -23,11 +24,12 @@ type API struct {
 	db         *sql.DB
 	ratings    *ratings.Service
 	letterboxd *letterboxd.Service
+	serializd  *serializd.Service
 	trakt      *trakt.Service
 }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
-	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), trakt: traktService}
+	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService}
 }
 
 type mediaJSON struct {
@@ -80,6 +82,52 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/letterboxd", a.letterboxdStatus)
 	mux.HandleFunc("/api/letterboxd/batches", a.letterboxdGenerate)
 	mux.HandleFunc("/api/letterboxd/batches/", a.letterboxdBatch)
+	mux.HandleFunc("/api/serializd", a.serializdStatus)
+	mux.HandleFunc("/api/serializd/mark-synced", a.serializdMarkSynced)
+}
+
+func (a *API) serializdOptions(ctx context.Context) (serializd.Options, error) {
+	settings, err := a.loadSettings(ctx)
+	if err != nil {
+		return serializd.Options{}, err
+	}
+	return serializd.Options{Enabled: settings.SerializdEnabled, ReminderChanges: settings.SerializdReminderChanges, ReminderDays: settings.SerializdReminderDays}, nil
+}
+
+func (a *API) serializdStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	options, err := a.serializdOptions(r.Context())
+	if err != nil {
+		internalError(w)
+		return
+	}
+	status, err := a.serializd.Status(r.Context(), options)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *API) serializdMarkSynced(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	options, err := a.serializdOptions(r.Context())
+	if err != nil {
+		internalError(w)
+		return
+	}
+	status, err := a.serializd.MarkSynced(r.Context(), options)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (a *API) letterboxdStatus(w http.ResponseWriter, r *http.Request) {

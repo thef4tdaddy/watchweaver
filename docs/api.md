@@ -54,3 +54,12 @@ pending, the user code and verification URL needed by the user.
 Generating or downloading CSV never confirms an import. Generated batches stay
 regeneratable until the user confirms one. CSV dates use the configured timezone,
 and each file remains below Letterboxd's 1 MB limit.
+
+## Serializd reminders
+
+- `GET /api/serializd` returns the confirmed checkpoint, pending transferable
+  episode activity, due reasons, unsupported/manual TV data, and official importer link.
+- `POST /api/serializd/mark-synced` is the only action that advances the checkpoint.
+
+Due state uses the configured change-count OR elapsed-days thresholds and remains
+false when Serializd is disabled or when no transferable changes are pending.

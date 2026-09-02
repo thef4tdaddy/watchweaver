@@ -346,3 +346,30 @@ func TestLetterboxdBatchAPIWorkflow(t *testing.T) {
 		t.Fatalf("missing batch: %d", rr.Code)
 	}
 }
+
+func TestSerializdStatusAndMarkSyncedAPI(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	rr := f.request(http.MethodPut, "/api/settings", `{"timezone":"UTC","serializd_enabled":true,"serializd_reminder_changes":1,"serializd_reminder_days":14}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("settings: %d %s", rr.Code, rr.Body.String())
+	}
+	show := mustExecID(t, f.db, `INSERT INTO media_items(media_type,title) VALUES('show','Show')`)
+	season := mustExecID(t, f.db, `INSERT INTO media_items(media_type,title,parent_id,season_number) VALUES('season','Season',?,1)`, show)
+	episode := mustExecID(t, f.db, `INSERT INTO media_items(media_type,title,parent_id,episode_number) VALUES('episode','Episode',?,1)`, season)
+	if _, err := f.db.Exec(`INSERT INTO watch_events(media_id,source,source_event_id,watched_at_utc,source_watched_at,is_baseline) VALUES(?,'trakt','serializd-1','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z',0)`, episode); err != nil {
+		t.Fatal(err)
+	}
+	rr = f.request(http.MethodGet, "/api/serializd", "")
+	body := decodeMap(t, rr)
+	if rr.Code != http.StatusOK || body["pending_changes"] != float64(1) || body["due"] != true || !strings.Contains(body["import_url"].(string), "serializd.com") {
+		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodPost, "/api/serializd/mark-synced", "")
+	body = decodeMap(t, rr)
+	if rr.Code != http.StatusOK || body["pending_changes"] != float64(0) || body["due"] != false || body["last_confirmed_at"] == nil {
+		t.Fatalf("mark synced: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr = f.request(http.MethodGet, "/api/integrations", ""); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"serializd":{"enabled":true`) {
+		t.Fatalf("integration: %d %s", rr.Code, rr.Body.String())
+	}
+}
