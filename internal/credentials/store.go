@@ -55,13 +55,18 @@ func (s *Store) migrateLegacy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	values := map[string]string{}
+	found := false
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
 			return err
 		}
-		values[key] = value
+		found = true
+		if strings.TrimSpace(value) != "" {
+			values[key] = value
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -69,17 +74,13 @@ func (s *Store) migrateLegacy(ctx context.Context) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for key, value := range values {
-		if value != "" {
-			if err := s.Set(ctx, "trakt", key, value); err != nil {
-				return err
-			}
-		}
+	if !found {
+		return nil
 	}
-	if len(values) > 0 {
-		_, err = s.db.ExecContext(ctx, `DELETE FROM integration_state WHERE integration='trakt' AND state_key IN ('access_token','refresh_token')`)
-	}
-	return err
+	return s.Update(ctx, "trakt", values, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM integration_state WHERE integration='trakt' AND state_key IN ('access_token','refresh_token')`)
+		return err
+	})
 }
 
 func DefaultKeyPath(databasePath string) string {
@@ -138,18 +139,44 @@ func loadOrCreateKey(path string) ([]byte, error) {
 }
 
 func (s *Store) Set(ctx context.Context, integration, key, value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fmt.Errorf("credential value is required")
+	return s.Update(ctx, integration, map[string]string{key: value}, nil)
+}
+
+// Update writes a credential set and related database state in one transaction.
+func (s *Store) Update(ctx context.Context, integration string, values map[string]string, extra func(context.Context, *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
+	defer tx.Rollback()
+	for key, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return fmt.Errorf("credential value is required")
+		}
+		ciphertext, err := s.encrypt(integration, key, value)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO encrypted_credentials(integration,credential_key,ciphertext) VALUES(?,?,?) ON CONFLICT(integration,credential_key) DO UPDATE SET ciphertext=excluded.ciphertext,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, integration, key, ciphertext); err != nil {
+			return err
+		}
+	}
+	if extra != nil {
+		if err := extra(ctx, tx); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) encrypt(integration, key, value string) ([]byte, error) {
 	nonce := make([]byte, s.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return fmt.Errorf("generate credential nonce: %w", err)
+		return nil, fmt.Errorf("generate credential nonce: %w", err)
 	}
 	aad := []byte(integration + ":" + key)
-	ciphertext := s.aead.Seal(nonce, nonce, []byte(value), aad)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO encrypted_credentials(integration,credential_key,ciphertext) VALUES(?,?,?) ON CONFLICT(integration,credential_key) DO UPDATE SET ciphertext=excluded.ciphertext,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, integration, key, ciphertext)
-	return err
+	return s.aead.Seal(nonce, nonce, []byte(value), aad), nil
 }
 
 func (s *Store) Get(ctx context.Context, integration, key string) (string, error) {

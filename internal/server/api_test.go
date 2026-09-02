@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -244,6 +245,11 @@ func TestSettingsDefaultsUpdateValidationAndSecretRedaction(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("settings: %d %s", rr.Code, rr.Body.String())
 	}
+	rr = f.request(http.MethodPut, "/api/settings", `{"timezone":"UTC"}`)
+	partial := decodeMap(t, rr)
+	if rr.Code != http.StatusOK || partial["trakt_poll_minutes"] != float64(10) || partial["prompt_tv_enabled"] != false {
+		t.Fatalf("partial settings: %d %s", rr.Code, rr.Body.String())
+	}
 	if rr = f.request(http.MethodPut, "/api/settings", `{"timezone":"Mars/Olympus","trakt_poll_minutes":5,"prompt_movies_enabled":true,"prompt_tv_enabled":true,"serializd_enabled":true,"serializd_reminder_changes":10,"serializd_reminder_days":7}`); rr.Code != http.StatusBadRequest {
 		t.Fatalf("invalid timezone: %d", rr.Code)
 	}
@@ -404,13 +410,16 @@ func TestUIManagedEncryptedIntegrationConfiguration(t *testing.T) {
 		t.Fatalf("trakt config=%d %s", rr.Code, rr.Body.String())
 	}
 	var encrypted []byte
-	if err := f.db.QueryRow(`SELECT ciphertext FROM encrypted_credentials WHERE integration='trakt' AND credential_key='client_secret'`).Scan(&encrypted); err != nil {
+	if err := f.db.QueryRowContext(context.Background(), `SELECT ciphertext FROM encrypted_credentials WHERE integration='trakt' AND credential_key='client_secret'`).Scan(&encrypted); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(encrypted), "private-secret") {
 		t.Fatal("credential stored in plaintext")
 	}
-	rr = f.request(http.MethodPut, "/api/integrations/discord/config", `{"webhook_url":"https://discord.invalid/api/webhooks/example/value","enabled":true}`)
+	if rejected := f.request(http.MethodPut, "/api/integrations/discord/config", `{"webhook_url":"https://example.test/api/webhooks/example/value","enabled":true}`); rejected.Code != http.StatusBadRequest {
+		t.Fatalf("non-Discord webhook accepted: %d", rejected.Code)
+	}
+	rr = f.request(http.MethodPut, "/api/integrations/discord/config", `{"webhook_url":"https://discord.com/api/webhooks/example/value","enabled":true}`)
 	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "webhooks") {
 		t.Fatalf("discord config=%d %s", rr.Code, rr.Body.String())
 	}

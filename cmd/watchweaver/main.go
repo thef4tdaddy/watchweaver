@@ -45,6 +45,8 @@ func main() {
 			if err := credentials.BackupKey(keyPath, destination+".key"); err != nil {
 				log.Fatalf("credential key backup failed: %v", err)
 			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			log.Fatalf("inspect credential key for backup: %v", err)
 		}
 		log.Printf("backup created: %s", destination)
 		return

@@ -786,6 +786,7 @@ function SettingsView({
           </div>
           <button
             role="switch"
+            aria-label="Serializd reminders"
             aria-checked={settings.serializd_enabled}
             className={`toggle ${settings.serializd_enabled ? "on" : ""}`}
             onClick={() =>

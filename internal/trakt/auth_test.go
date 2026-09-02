@@ -58,7 +58,9 @@ func TestDeviceAuthorizationPendingSlowDownSuccessAndRestart(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/oauth/device/code":
-			json.NewEncoder(w).Encode(DeviceCode{DeviceCode: "DEVICE-SECRET", UserCode: "ABCD", VerificationURL: "https://example.test/activate", ExpiresIn: 600, Interval: 1})
+			if err := json.NewEncoder(w).Encode(DeviceCode{DeviceCode: "DEVICE-SECRET", UserCode: "ABCD", VerificationURL: "https://example.test/activate", ExpiresIn: 600, Interval: 1}); err != nil {
+				t.Error(err)
+			}
 		case "/oauth/device/token":
 			tokenCalls++
 			if tokenCalls == 1 {
@@ -69,7 +71,9 @@ func TestDeviceAuthorizationPendingSlowDownSuccessAndRestart(t *testing.T) {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
-			json.NewEncoder(w).Encode(token{AccessToken: "ACCESS", RefreshToken: "REFRESH", ExpiresIn: 3600, CreatedAt: 1})
+			if err := json.NewEncoder(w).Encode(token{AccessToken: "ACCESS", RefreshToken: "REFRESH", ExpiresIn: 3600, CreatedAt: 1}); err != nil {
+				t.Error(err)
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -119,7 +123,9 @@ func TestRefreshSuccessAndFailureRequiresReauth(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		json.NewEncoder(w).Encode(token{AccessToken: "NEW-A", RefreshToken: "NEW-R"})
+		if err := json.NewEncoder(w).Encode(token{AccessToken: "NEW-A", RefreshToken: "NEW-R"}); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer ts.Close()
 	s := NewService(db, Config{ClientID: "id", ClientSecret: "secret", BaseURL: ts.URL, HTTPClient: ts.Client()})
@@ -150,7 +156,7 @@ func TestRemoteErrorsMalformedAndCancellation(t *testing.T) {
 		name    string
 		handler http.HandlerFunc
 	}{
-		{"malformed", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("not-json")) }},
+		{"malformed", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("not-json")) }},
 		{"server", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }},
 	}
 	for _, tc := range cases {
@@ -179,7 +185,9 @@ func TestDeniedAndExpiredClearPending(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if calls == 0 {
 					calls++
-					json.NewEncoder(w).Encode(DeviceCode{DeviceCode: "d", UserCode: "u", VerificationURL: "v", ExpiresIn: 10, Interval: 1})
+					if err := json.NewEncoder(w).Encode(DeviceCode{DeviceCode: "d", UserCode: "u", VerificationURL: "v", ExpiresIn: 10, Interval: 1}); err != nil {
+						t.Error(err)
+					}
 					return
 				}
 				w.WriteHeader(code)

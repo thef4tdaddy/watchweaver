@@ -636,6 +636,16 @@ type settingsJSON struct {
 	SerializdReminderDays    int    `json:"serializd_reminder_days"`
 }
 
+type settingsUpdateJSON struct {
+	Timezone                 *string `json:"timezone"`
+	TraktPollMinutes         *int    `json:"trakt_poll_minutes"`
+	PromptMoviesEnabled      *bool   `json:"prompt_movies_enabled"`
+	PromptTVEnabled          *bool   `json:"prompt_tv_enabled"`
+	SerializdEnabled         *bool   `json:"serializd_enabled"`
+	SerializdReminderChanges *int    `json:"serializd_reminder_changes"`
+	SerializdReminderDays    *int    `json:"serializd_reminder_days"`
+}
+
 func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -646,9 +656,35 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, settings)
 	case http.MethodPut:
-		var body settingsJSON
-		if !decodeJSON(w, r, &body) {
+		var update settingsUpdateJSON
+		if !decodeJSON(w, r, &update) {
 			return
+		}
+		body, err := a.loadSettings(r.Context())
+		if err != nil {
+			internalError(w)
+			return
+		}
+		if update.Timezone != nil {
+			body.Timezone = *update.Timezone
+		}
+		if update.TraktPollMinutes != nil {
+			body.TraktPollMinutes = *update.TraktPollMinutes
+		}
+		if update.PromptMoviesEnabled != nil {
+			body.PromptMoviesEnabled = *update.PromptMoviesEnabled
+		}
+		if update.PromptTVEnabled != nil {
+			body.PromptTVEnabled = *update.PromptTVEnabled
+		}
+		if update.SerializdEnabled != nil {
+			body.SerializdEnabled = *update.SerializdEnabled
+		}
+		if update.SerializdReminderChanges != nil {
+			body.SerializdReminderChanges = *update.SerializdReminderChanges
+		}
+		if update.SerializdReminderDays != nil {
+			body.SerializdReminderDays = *update.SerializdReminderDays
 		}
 		if _, err := time.LoadLocation(body.Timezone); err != nil {
 			badRequest(w, "timezone must be a valid IANA timezone")

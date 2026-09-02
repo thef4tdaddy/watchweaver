@@ -70,17 +70,16 @@ func (a *API) traktConfig(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, "both Trakt client ID and client secret are required")
 			return
 		}
+		updates := map[string]string{}
 		if body.ClientID != "" {
-			if err := a.credentials.Set(r.Context(), "trakt", "client_id", body.ClientID); err != nil {
-				internalError(w)
-				return
-			}
+			updates["client_id"] = body.ClientID
 		}
 		if body.ClientSecret != "" {
-			if err := a.credentials.Set(r.Context(), "trakt", "client_secret", body.ClientSecret); err != nil {
-				internalError(w)
-				return
-			}
+			updates["client_secret"] = body.ClientSecret
+		}
+		if err := a.credentials.Update(r.Context(), "trakt", updates, nil); err != nil {
+			internalError(w)
+			return
 		}
 		a.trakt.Configure(currentID, currentSecret)
 		writeJSON(w, http.StatusOK, map[string]any{"configured": true})
@@ -127,16 +126,12 @@ func (a *API) discordConfig(w http.ResponseWriter, r *http.Request) {
 		body.WebhookURL = strings.TrimSpace(body.WebhookURL)
 		if body.WebhookURL != "" {
 			parsed, err := url.Parse(body.WebhookURL)
-			if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-				badRequest(w, "Discord webhook must be a valid HTTPS URL")
+			if err != nil || !validDiscordWebhook(parsed) {
+				badRequest(w, "Discord webhook must be an official Discord HTTPS webhook URL")
 				return
 			}
 			if a.credentials.IsOverridden("discord", "webhook_url") {
 				conflict(w, "Discord webhook is overridden by the server environment")
-				return
-			}
-			if err := a.credentials.Set(r.Context(), "discord", "webhook_url", body.WebhookURL); err != nil {
-				internalError(w)
 				return
 			}
 		}
@@ -145,11 +140,21 @@ func (a *API) discordConfig(w http.ResponseWriter, r *http.Request) {
 			internalError(w)
 			return
 		}
+		if body.WebhookURL != "" {
+			webhook = body.WebhookURL
+		}
 		if body.Enabled && webhook == "" {
 			badRequest(w, "Discord webhook URL is required when enabled")
 			return
 		}
-		if _, err := a.db.ExecContext(r.Context(), `INSERT INTO app_settings(setting_key,setting_value) VALUES('discord_enabled',?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, strconv.FormatBool(body.Enabled)); err != nil {
+		updates := map[string]string{}
+		if body.WebhookURL != "" {
+			updates["webhook_url"] = body.WebhookURL
+		}
+		if err := a.credentials.Update(r.Context(), "discord", updates, func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO app_settings(setting_key,setting_value) VALUES('discord_enabled',?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, strconv.FormatBool(body.Enabled))
+			return err
+		}); err != nil {
 			internalError(w)
 			return
 		}
@@ -174,6 +179,12 @@ func (a *API) discordConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func validDiscordWebhook(parsed *url.URL) bool {
+	host := strings.ToLower(parsed.Hostname())
+	allowedHost := host == "discord.com" || host == "www.discord.com" || host == "discordapp.com" || host == "www.discordapp.com"
+	return parsed.Scheme == "https" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && allowedHost && strings.HasPrefix(parsed.EscapedPath(), "/api/webhooks/")
 }
 
 func (a *API) discordTest(w http.ResponseWriter, r *http.Request) {

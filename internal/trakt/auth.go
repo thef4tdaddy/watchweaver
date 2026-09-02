@@ -33,6 +33,7 @@ type Config struct {
 type SecretStore interface {
 	Get(context.Context, string, string) (string, error)
 	Set(context.Context, string, string, string) error
+	Update(context.Context, string, map[string]string, func(context.Context, *sql.Tx) error) error
 }
 
 type PublicStatus struct {
@@ -183,14 +184,10 @@ func (s *Service) Refresh(ctx context.Context) error {
 
 func (s *Service) persistToken(ctx context.Context, tok token) error {
 	if s.secrets != nil {
-		if err := s.secrets.Set(ctx, "trakt", "access_token", tok.AccessToken); err != nil {
+		return s.secrets.Update(ctx, "trakt", map[string]string{"access_token": tok.AccessToken, "refresh_token": tok.RefreshToken}, func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','reauth_required','0') ON CONFLICT(integration,state_key) DO UPDATE SET state_value='0',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
 			return err
-		}
-		if err := s.secrets.Set(ctx, "trakt", "refresh_token", tok.RefreshToken); err != nil {
-			return err
-		}
-		_, err := s.db.ExecContext(ctx, `INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','reauth_required','0') ON CONFLICT(integration,state_key) DO UPDATE SET state_value='0',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
-		return err
+		})
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -15,9 +15,9 @@ export default function SetupGate(){
   const [setup,setSetup]=useState<Setup>()
   const [open,setOpen]=useState(false)
   const [error,setError]=useState('')
-  const refresh=()=>request<Setup>('/api/setup').then(value=>{setSetup(value);if(!value.complete)setOpen(true)}).catch(e=>setError(e.message))
+  const refresh=()=>request<Setup>('/api/setup').then(value=>{setError('');setSetup(value);if(!value.complete)setOpen(true)}).catch(e=>setError(e.message))
   useEffect(()=>{void refresh()},[])
-  if(!setup)return <div className="setup-loading">Starting WatchWeaver…</div>
+  if(!setup)return <div className="setup-loading">{error?<><p>{error}</p><button onClick={()=>void refresh()}>Retry</button></>:'Starting WatchWeaver…'}</div>
   if(!setup.complete)return <SetupDialog setup={setup} required onClose={()=>void refresh()} onChanged={refresh}/>
   return <><App/><button className="configure-button" onClick={()=>setOpen(true)}>Configure integrations</button>{open&&<SetupDialog setup={setup} required={!setup.complete} onClose={()=>{setOpen(false);void refresh()}} onChanged={refresh}/>} {error&&<div className="setup-toast">{error}</div>}</>
 }

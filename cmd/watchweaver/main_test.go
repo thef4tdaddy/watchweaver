@@ -31,11 +31,11 @@ func TestApplicationPollIntervalUsesPersistedPreference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if got := applicationPollInterval(context.Background(), db, 9*time.Minute); got != 9*time.Minute {
 		t.Fatalf("default=%v", got)
 	}
-	if _, err := db.Exec(`INSERT INTO app_settings(setting_key,setting_value) VALUES('trakt_poll_minutes','17')`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO app_settings(setting_key,setting_value) VALUES('trakt_poll_minutes','17')`); err != nil {
 		t.Fatal(err)
 	}
 	if got := applicationPollInterval(context.Background(), db, 9*time.Minute); got != 17*time.Minute {

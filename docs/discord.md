@@ -72,7 +72,7 @@ A failed Discord notification may be retried conservatively, but WatchWeaver mus
 
 Discord is independently optional. If Discord configuration is absent or disabled, the subsystem does not run and the rest of WatchWeaver behaves normally.
 
-Discord credentials, webhook URLs, channel identifiers, guild identifiers, and message identifiers must never be hard-coded into the repository. The normal webhook setup path is the write-only web wizard; values are encrypted at rest and never returned by status APIs. Environment configuration is an optional locked administrator override.
+Discord credentials, webhook URLs, channel identifiers, guild identifiers, and message identifiers must never be hard-coded into the repository. The normal webhook setup path is the write-only web wizard; values are encrypted at rest and never returned by status APIs. The wizard accepts only official `discord.com` or `discordapp.com` HTTPS webhook URLs. Environment configuration is an optional locked administrator override.
 
 Secrets must not be logged. Identifiers should only be logged when operationally useful and should not appear in public example configuration.
 

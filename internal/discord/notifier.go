@@ -55,6 +55,8 @@ func NewNotifier(db *sql.DB, options Options) *Notifier {
 	if options.HTTPClient == nil {
 		options.HTTPClient = http.DefaultClient
 	}
+	client := *options.HTTPClient
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	if options.Interval <= 0 {
 		options.Interval = DefaultInterval
 	}
@@ -63,7 +65,7 @@ func NewNotifier(db *sql.DB, options Options) *Notifier {
 	}
 	service := serializd.NewService(db)
 	service.SetNow(options.Now)
-	return &Notifier{db: db, webhookURL: strings.TrimSpace(options.WebhookURL), httpClient: options.HTTPClient, interval: options.Interval, now: options.Now, serializd: service}
+	return &Notifier{db: db, webhookURL: strings.TrimSpace(options.WebhookURL), httpClient: &client, interval: options.Interval, now: options.Now, serializd: service}
 }
 
 func (n *Notifier) Run(ctx context.Context) error {
@@ -252,14 +254,14 @@ type webhookError struct {
 }
 
 func (e *webhookError) Error() string {
-	return fmt.Sprintf("Discord webhook returned HTTP %d", e.status)
+	return fmt.Sprintf("discord webhook returned HTTP %d", e.status)
 }
 func (n *Notifier) send(ctx context.Context, content string) error {
 	n.mu.RLock()
 	webhookURL := n.webhookURL
 	n.mu.RUnlock()
 	if webhookURL == "" {
-		return fmt.Errorf("Discord webhook is not configured")
+		return fmt.Errorf("discord webhook is not configured")
 	}
 	body, err := json.Marshal(map[string]string{"content": content})
 	if err != nil {
