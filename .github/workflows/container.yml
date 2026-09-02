@@ -34,7 +34,7 @@ jobs:
           docker exec watchweaver-ci watchweaver backup /data/backups/ci.db
           docker stop watchweaver-ci
           docker rm watchweaver-ci
-          docker run --rm -v watchweaver-ci:/data alpine:3.22 sh -c 'mv /data/watchweaver.db /data/pre-restore.db && cp /data/backups/ci.db /data/watchweaver.db && rm -f /data/watchweaver.db-wal /data/watchweaver.db-shm'
+          docker run --rm -v watchweaver-ci:/data alpine:3.22 sh -c 'mv /data/watchweaver.db /data/pre-restore.db && cp /data/backups/ci.db /data/watchweaver.db && rm -f /data/watchweaver.db-wal /data/watchweaver.db-shm && chown -R 10001:10001 /data'
           docker run -d --name watchweaver-ci-restored -p 18080:8080 -v watchweaver-ci:/data watchweaver:test
           for attempt in $(seq 1 30); do
             wget -qO- http://127.0.0.1:18080/readyz && break

@@ -18,7 +18,7 @@ ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/watchweaver ./cmd/watchweaver
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata && addgroup -S watchweaver && adduser -S -G watchweaver -h /nonexistent watchweaver && mkdir -p /data/backups /data/exports && chown -R watchweaver:watchweaver /data
+RUN apk add --no-cache ca-certificates tzdata && addgroup -S -g 10001 watchweaver && adduser -S -D -H -u 10001 -G watchweaver watchweaver && mkdir -p /data/backups /data/exports && chown -R watchweaver:watchweaver /data
 COPY --from=backend /out/watchweaver /usr/local/bin/watchweaver
 USER watchweaver
 VOLUME ["/data"]
