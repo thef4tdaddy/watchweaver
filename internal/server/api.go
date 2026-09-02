@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -160,7 +161,7 @@ func (a *API) letterboxdStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := a.letterboxd.Status(r.Context(), settings.Timezone)
 	if err != nil {
-		internalError(w)
+		internalError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
@@ -170,7 +171,7 @@ func (a *API) letterboxdGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		batches, err := a.letterboxd.ListBatches(r.Context())
 		if err != nil {
-			internalError(w)
+			internalError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": batches})
@@ -191,7 +192,7 @@ func (a *API) letterboxdGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		internalError(w)
+		internalError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, batch)
@@ -214,7 +215,7 @@ func (a *API) letterboxdBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			internalError(w)
+			internalError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, batch)
@@ -231,7 +232,7 @@ func (a *API) letterboxdBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			internalError(w)
+			internalError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, batch)
@@ -249,7 +250,7 @@ func (a *API) letterboxdBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			internalError(w)
+			internalError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -959,6 +960,11 @@ func notFound(w http.ResponseWriter)                   { writeError(w, http.Stat
 func methodNotAllowed(w http.ResponseWriter) {
 	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
-func internalError(w http.ResponseWriter) {
+func internalError(w http.ResponseWriter, causes ...error) {
+	for _, err := range causes {
+		if err != nil {
+			log.Printf("internal API error: %v", err)
+		}
+	}
 	writeError(w, http.StatusInternalServerError, "internal server error")
 }

@@ -82,6 +82,9 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 	// connection pool instead of relying on a one-time, connection-local PRAGMA.
 	query := url.Values{}
 	query.Add("_pragma", "foreign_keys(1)")
+	// Normal application work can briefly overlap with the background Trakt
+	// writer. Wait for that writer instead of surfacing an avoidable SQLITE_BUSY.
+	query.Add("_pragma", "busy_timeout(5000)")
 	dsn := "file:" + filepath.ToSlash(dbPath) + "?" + query.Encode()
 
 	db, err := sql.Open("sqlite", dsn)
