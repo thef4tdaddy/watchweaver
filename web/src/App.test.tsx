@@ -91,7 +91,22 @@ beforeEach(() => {
         });
       if (path === "/api/letterboxd/batches") return json({ items: [] });
       if (path === "/api/serializd/mark-synced" && init?.method === "POST")
-        return json({});
+        return json({
+          enabled: true,
+          pending_changes: 0,
+          pending_episode_watches: 0,
+          pending_rating_changes: 0,
+          tracked_episode_watches: 42,
+          count_threshold_reached: false,
+          elapsed_threshold_reached: false,
+          due: false,
+          unsupported_season_ratings: 0,
+          unsupported_tv_reviews: 0,
+          reminder_changes: 20,
+          reminder_days: 14,
+          import_url: "https://serializd.example/import",
+          last_confirmed_at: "2026-09-02T12:00:00Z",
+        });
       if (path === "/api/integrations/trakt/sync" && init?.method === "POST")
         return json({ running: false });
       if (path === "/api/status")
@@ -207,6 +222,16 @@ describe("WatchWeaver dashboard", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+  });
+  it("immediately shows the confirmed Serializd checkpoint", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /Television/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Mark synced" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Never")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Sep 2, 2026/)).toBeInTheDocument();
   });
   it("shows operational status and runs its recovery action", async () => {
     render(<App />);
