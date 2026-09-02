@@ -76,6 +76,18 @@ export type Integrations = {
   serializd: { enabled: boolean; status: string };
   discord: { enabled: boolean; status: string };
 };
+export type OperationalComponent = {
+  state: "working" | "needs_attention" | "disabled";
+  label: string;
+  detail: string;
+  action?: string;
+};
+export type OperationalStatus = {
+  overall: "working" | "needs_attention";
+  checked_at: string;
+  components: Record<string, OperationalComponent>;
+  backup: OperationalComponent & { last_backup?: string; size_bytes?: number };
+};
 export type LetterboxdStatus = {
   pending_rows: number;
   pending_events: number;

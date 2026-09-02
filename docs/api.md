@@ -6,6 +6,12 @@ responses and never fall through to the SPA.
 
 ## Workflow
 
+- `GET /api/status` returns action-oriented health for Trakt, Discord,
+  Letterboxd, Serializd, SQLite, and application backups.
+- `GET /api/diagnostics` downloads a redacted JSON report containing component
+  states and aggregate counts. It excludes credentials, tokens, webhook URLs,
+  titles, external IDs, database paths, and detailed remote errors.
+
 - `GET /api/inbox?page=1&per_page=50` lists pending and snoozed tasks.
 - `POST /api/tasks/{id}/complete` accepts `rating`, `review`, or both and saves
   the supplied values in the same transaction that completes the task.

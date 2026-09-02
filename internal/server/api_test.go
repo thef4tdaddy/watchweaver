@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -318,6 +319,46 @@ func TestAPIRoutesDoNotBreakHealthOrSPAFallback(t *testing.T) {
 	}
 	if rr := f.request(http.MethodGet, "/api/not-real", ""); rr.Code != http.StatusNotFound {
 		t.Fatalf("unknown API should not fall through to SPA: %d", rr.Code)
+	}
+}
+
+func TestOperationalStatusAndRedactedDiagnostics(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	rr := f.request(http.MethodGet, "/api/status", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"database":{"state":"working"`) || !strings.Contains(rr.Body.String(), `"backup":{"state":"needs_attention"`) {
+		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
+	}
+	var sequence int
+	var name, dbPath string
+	if err := f.db.QueryRowContext(context.Background(), `PRAGMA database_list`).Scan(&sequence, &name, &dbPath); err != nil {
+		t.Fatal(err)
+	}
+	backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "recent.db"), []byte("backup"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rr = f.request(http.MethodGet, "/api/status", "")
+	if !strings.Contains(rr.Body.String(), "missing its companion encryption key") {
+		t.Fatalf("missing-key status: %s", rr.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "recent.db.key"), []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rr = f.request(http.MethodGet, "/api/status", "")
+	if !strings.Contains(rr.Body.String(), `"backup":{"state":"working"`) {
+		t.Fatalf("valid backup status: %s", rr.Body.String())
+	}
+	rr = f.request(http.MethodGet, "/api/diagnostics", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Header().Get("Content-Disposition"), "watchweaver-diagnostics.json") {
+		t.Fatalf("diagnostics response: %d %v", rr.Code, rr.Header())
+	}
+	for _, private := range []string{"The Example", "watchweaver.db", "access_token", "webhook_url"} {
+		if strings.Contains(rr.Body.String(), private) {
+			t.Fatalf("diagnostics leaked %q: %s", private, rr.Body.String())
+		}
 	}
 }
 

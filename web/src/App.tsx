@@ -6,6 +6,7 @@ import {
   type HistoryItem,
   type Integrations,
   type LetterboxdStatus,
+  type OperationalStatus,
   type Page,
   type Rating,
   type SerializdStatus,
@@ -14,12 +15,13 @@ import {
   request,
 } from "./api";
 
-type View = "inbox" | "history" | "movies" | "tv" | "settings";
+type View = "inbox" | "history" | "movies" | "tv" | "status" | "settings";
 const nav: [View, string, string][] = [
   ["inbox", "Inbox", "⌁"],
   ["history", "History", "◷"],
   ["movies", "Movies", "◇"],
   ["tv", "Television", "▱"],
+  ["status", "Status", "!"],
   ["settings", "Settings", "⚙"],
 ];
 const stars = Array.from({ length: 10 }, (_, i) => i + 1);
@@ -96,6 +98,13 @@ function App() {
         {view === "history" && <History onError={setError} />}{" "}
         {view === "movies" && <Movies onError={setError} />}{" "}
         {view === "tv" && <Television onError={setError} />}{" "}
+        {view === "status" && (
+          <StatusView
+            onNavigate={setView}
+            onError={setError}
+            refreshIntegrations={refreshIntegrations}
+          />
+        )}{" "}
         {view === "settings" && (
           <SettingsView
             integrations={integrations}
@@ -105,6 +114,143 @@ function App() {
         )}
       </main>
     </div>
+  );
+}
+
+function StatusView({
+  onNavigate,
+  onError,
+  refreshIntegrations,
+}: {
+  onNavigate: (view: View) => void;
+  onError: (value: string) => void;
+  refreshIntegrations: () => void;
+}) {
+  const [status, setStatus] = useState<OperationalStatus>();
+  const [busy, setBusy] = useState("");
+  const [showBackupHelp, setShowBackupHelp] = useState(false);
+  const load = useCallback(
+    () =>
+      request<OperationalStatus>("/api/status")
+        .then(setStatus)
+        .catch((e) => onError(e.message)),
+    [onError],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const act = async (name: string, action?: string) => {
+    if (action === "configure") {
+      onNavigate("settings");
+      return;
+    }
+    if (action === "open") {
+      onNavigate(name === "letterboxd" ? "movies" : "tv");
+      return;
+    }
+    if (action === "instructions") {
+      setShowBackupHelp(true);
+      return;
+    }
+    setBusy(name);
+    try {
+      if (action === "sync" || action === "retry")
+        await request("/api/integrations/trakt/sync", { method: "POST" });
+      if (action === "test")
+        await request("/api/integrations/discord/test", { method: "POST" });
+      refreshIntegrations();
+      await load();
+    } catch (e) {
+      onError((e as Error).message);
+      await load();
+    } finally {
+      setBusy("");
+    }
+  };
+  if (!status) return <Loading />;
+  const entries = [
+    ...Object.entries(status.components),
+    ["backup", status.backup] as const,
+  ];
+  return (
+    <section>
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">OPERATIONS</p>
+          <h2>
+            {status.overall === "working"
+              ? "Everything is working"
+              : "Some items need attention"}
+          </h2>
+          <p>Checked {formatDate(status.checked_at)}</p>
+        </div>
+        <button className="secondary" onClick={() => void load()}>
+          Refresh status
+        </button>
+      </div>
+      <div className="settings-grid">
+        {entries.map(([name, component]) => (
+          <article className="settings-card" key={name}>
+            <div className="card-heading">
+              <h2>{component.label}</h2>
+              <span
+                className={`state ${component.state === "working" ? "confirmed" : "pending"}`}
+              >
+                {humanStatus(component.state)}
+              </span>
+            </div>
+            <p>{component.detail}</p>
+            {name === "backup" && status.backup.last_backup && (
+              <p>
+                Latest backup: {formatDate(status.backup.last_backup)} ·{" "}
+                {Math.ceil((status.backup.size_bytes || 0) / 1024)} KB
+              </p>
+            )}
+            <div className="setup-actions">
+              {component.action && component.action !== "diagnostics" && (
+                <button
+                  className="primary"
+                  disabled={busy === name}
+                  onClick={() => void act(name, component.action)}
+                >
+                  {busy === name ? "Working…" : actionLabel(component.action)}
+                </button>
+              )}
+              {name === "backup" && showBackupHelp && (
+                <div className="override-note">
+                  Run{" "}
+                  <code>
+                    docker compose exec watchweaver watchweaver backup
+                  </code>
+                  . Keep the generated <code>.db</code> and companion{" "}
+                  <code>.key</code> files together.
+                </div>
+              )}
+              {component.action === "diagnostics" && (
+                <a className="primary" href="/api/diagnostics" download>
+                  Download diagnostics
+                </a>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function actionLabel(action?: string) {
+  return (
+    (
+      {
+        sync: "Sync now",
+        retry: "Retry sync",
+        configure: "Open settings",
+        test: "Send test",
+        open: "Open workflow",
+        instructions: "Show backup command",
+      } as Record<string, string>
+    )[action || ""] || "Open"
   );
 }
 

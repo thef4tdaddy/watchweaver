@@ -88,6 +88,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/media/", a.mediaResource)
 	mux.HandleFunc("/api/settings", a.settings)
 	mux.HandleFunc("/api/integrations", a.integrationStatus)
+	mux.HandleFunc("/api/status", a.operationalStatus)
+	mux.HandleFunc("/api/diagnostics", a.diagnostics)
 	mux.HandleFunc("/api/setup", a.setupStatus)
 	mux.HandleFunc("/api/integrations/trakt/config", a.traktConfig)
 	mux.HandleFunc("/api/integrations/trakt/authorize", a.traktAuthorize)
