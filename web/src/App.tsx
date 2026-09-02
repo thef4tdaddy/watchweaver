@@ -678,8 +678,11 @@ function Television({ onError }: { onError: (v: string) => void }) {
   const mark = async () => {
     setMarking(true);
     try {
-      await request("/api/serializd/mark-synced", { method: "POST" });
-      await load();
+      const updated = await request<SerializdStatus>(
+        "/api/serializd/mark-synced",
+        { method: "POST" },
+      );
+      setStatus(updated);
     } catch (e) {
       onError((e as Error).message);
     } finally {
@@ -722,7 +725,10 @@ function Television({ onError }: { onError: (v: string) => void }) {
         </div>
       </div>
       <div className="metric-grid">
-        <Metric value={status.tracked_episode_watches} label="Episodes tracked" />
+        <Metric
+          value={status.tracked_episode_watches}
+          label="Total episodes in history"
+        />
         <Metric
           value={status.pending_episode_watches}
           label="New episode watches"
