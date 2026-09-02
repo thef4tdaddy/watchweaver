@@ -2,6 +2,12 @@
 
 WatchWeaver is a self-hosted application that is expected to handle authentication credentials and private viewing activity. Security and privacy issues should be treated carefully even during early development.
 
+## Supported network boundary
+
+WatchWeaver does not provide application-native authentication. Supported deployments must restrict access to a trusted LAN, a private VPN, or an authenticated reverse proxy. Direct exposure of the WatchWeaver port to the public internet is unsupported.
+
+Anyone who can reach the web interface can use its administrative and workflow controls. Firewall, VPN, and reverse-proxy access rules are therefore part of the required security boundary, not optional hardening.
+
 ## Reporting a vulnerability
 
 Please do **not** open a public GitHub issue containing a vulnerability that could expose credentials, authentication tokens, private watch history, Discord access, or other sensitive information.

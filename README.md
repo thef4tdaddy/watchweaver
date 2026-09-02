@@ -52,7 +52,8 @@ Trakt is intended to provide automated viewing activity. WatchWeaver maintains i
 
 ## Install with Docker Compose
 
-WatchWeaver is designed for a trusted LAN or an authenticated reverse proxy/VPN. Do not expose it directly to the public internet.
+> [!WARNING]
+> WatchWeaver has no application login. It is supported only on a trusted LAN, through a private VPN, or behind an authenticated reverse proxy. Direct public-internet exposure is unsupported and may expose private viewing data and administrative controls.
 
 ```bash
 git clone https://github.com/thef4tdaddy/watchweaver.git
