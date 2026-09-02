@@ -30,7 +30,8 @@ func main() {
 	}
 	defer db.Close()
 
-	httpServer := server.New(cfg.ListenAddr, server.NewHandler(readiness))
+	traktService := trakt.NewService(db, trakt.Config{ClientID: cfg.TraktClientID, ClientSecret: cfg.TraktClientSecret, BaseURL: cfg.TraktBaseURL})
+	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, server.NewAPI(db, traktService)))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

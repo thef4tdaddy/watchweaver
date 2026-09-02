@@ -34,16 +34,27 @@ func (r *Readiness) IsReady() bool {
 }
 
 func NewHandler(readiness *Readiness) http.Handler {
-	return newHandler(readiness, discoverStaticAssetsFS())
+	return NewHandlerWithAPI(readiness, nil)
+}
+
+func NewHandlerWithAPI(readiness *Readiness, api *API) http.Handler {
+	return newHandlerWithAPI(readiness, discoverStaticAssetsFS(), api)
 }
 
 func newHandler(readiness *Readiness, staticAssets fs.FS) http.Handler {
+	return newHandlerWithAPI(readiness, staticAssets, nil)
+}
+
+func newHandlerWithAPI(readiness *Readiness, staticAssets fs.FS, api *API) http.Handler {
 	if readiness == nil {
 		readiness = NewReadiness()
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthz)
 	mux.HandleFunc("/readyz", readyz(readiness))
+	if api != nil {
+		api.Register(mux)
+	}
 	if staticAssets != nil {
 		mux.Handle("/", newSPAHandler(staticAssets))
 	}
