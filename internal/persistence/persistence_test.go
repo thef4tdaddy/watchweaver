@@ -188,8 +188,8 @@ func TestOpenAndMigrateRequestsWALMode(t *testing.T) {
 	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
 		t.Fatalf("read busy timeout: %v", err)
 	}
-	if busyTimeout != 5000 {
-		t.Fatalf("expected 5000ms busy timeout, got %d", busyTimeout)
+	if busyTimeout != 30000 {
+		t.Fatalf("expected 30000ms busy timeout, got %d", busyTimeout)
 	}
 }
 

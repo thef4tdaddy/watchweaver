@@ -84,7 +84,7 @@ func openSQLite(dbPath string) (*sql.DB, error) {
 	query.Add("_pragma", "foreign_keys(1)")
 	// Normal application work can briefly overlap with the background Trakt
 	// writer. Wait for that writer instead of surfacing an avoidable SQLITE_BUSY.
-	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "busy_timeout(30000)")
 	// Reserve the WAL writer when a transaction begins. Without this, an export
 	// can read first and fail when it upgrades to a writer while Trakt commits.
 	query.Add("_txlock", "immediate")

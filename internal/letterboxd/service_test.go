@@ -181,6 +181,40 @@ func TestNothingPendingAndMissingBatch(t *testing.T) {
 	}
 }
 
+func TestConfirmWaitsForConcurrentWriter(t *testing.T) {
+	db := testDB(t)
+	movie := addMovie(t, db, "Movie", 2020, "", "")
+	addWatch(t, db, movie, "1", "2026-01-01T00:00:00Z")
+	service := NewService(db)
+	batch, err := service.Generate(context.Background(), "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Exec(`INSERT INTO app_metadata(key,value) VALUES('trakt-sync','active')`); err != nil {
+		t.Fatal(err)
+	}
+	confirmed := make(chan error, 1)
+	go func() {
+		_, confirmErr := service.Confirm(context.Background(), batch.ID)
+		confirmed <- confirmErr
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if err := writer.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-confirmed; err != nil {
+		t.Fatalf("confirmation did not wait for writer: %v", err)
+	}
+	stored, err := service.GetBatch(context.Background(), batch.ID)
+	if err != nil || stored.State != "confirmed" {
+		t.Fatalf("batch=%+v err=%v", stored, err)
+	}
+}
+
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "letterboxd.db")})
