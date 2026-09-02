@@ -42,12 +42,17 @@ updating either replaces its current value without changing watch history.
   returned.
 - `POST /api/integrations/trakt/authorize` starts Trakt device authorization.
 - `POST /api/integrations/trakt/authorize/poll` advances pending authorization.
+- `POST /api/integrations/trakt/sync` immediately runs one serialized history
+  and rating synchronization cycle, returning its durable result summary.
 - `PUT|DELETE /api/integrations/discord/config` saves encrypted write-only
   webhook configuration and enablement.
 - `POST /api/integrations/discord/test` sends an explicit test announcement.
 
 The public Trakt authorization response includes only its state and, while
 pending, the user code and verification URL needed by the user.
+The web client polls pending device authorization automatically. Integration
+status reports whether synchronization is running, its last result or error,
+pending rating count, and the next scheduled run.
 
 ## Letterboxd exports
 

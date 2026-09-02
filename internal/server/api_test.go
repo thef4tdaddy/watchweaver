@@ -269,6 +269,9 @@ func TestTraktAuthorizationEndpoints(t *testing.T) {
 			body = `{"device_code":"device-secret","user_code":"ABCD","verification_url":"https://trakt.tv/activate","expires_in":600,"interval":1}`
 		case "/oauth/device/token":
 			body = `{"access_token":"access-secret","refresh_token":"refresh-secret"}`
+		case "/sync/history", "/sync/ratings/all":
+			body = `[]`
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}, "X-Pagination-Page-Count": []string{"1"}}}, nil
 		default:
 			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
 		}
@@ -281,6 +284,12 @@ func TestTraktAuthorizationEndpoints(t *testing.T) {
 	defer db.Close()
 	service := trakt.NewService(db, trakt.Config{ClientID: "client", ClientSecret: "client-secret", BaseURL: "https://trakt.invalid", HTTPClient: client})
 	f := newAPIFixture(t, service)
+	manager := trakt.NewSyncManager(db, trakt.SyncManagerOptions{BaseURL: "https://trakt.invalid", HTTPClient: client, ClientID: "client", AccessToken: func(ctx context.Context) (string, error) {
+		var token string
+		err := db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='access_token'`).Scan(&token)
+		return token, err
+	}})
+	f.api.SetTraktSyncManager(manager)
 	rr := f.request(http.MethodPost, "/api/integrations/trakt/authorize", "")
 	if rr.Code != http.StatusAccepted || !strings.Contains(rr.Body.String(), "ABCD") || strings.Contains(rr.Body.String(), "device-secret") {
 		t.Fatalf("authorize: %d %s", rr.Code, rr.Body.String())
@@ -292,6 +301,10 @@ func TestTraktAuthorizationEndpoints(t *testing.T) {
 	rr = f.request(http.MethodGet, "/api/integrations", "")
 	if !strings.Contains(rr.Body.String(), `"status":"connected"`) || strings.Contains(rr.Body.String(), "secret") {
 		t.Fatalf("status: %s", rr.Body.String())
+	}
+	rr = f.request(http.MethodPost, "/api/integrations/trakt/sync", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"last_result"`) {
+		t.Fatalf("manual sync: %d %s", rr.Code, rr.Body.String())
 	}
 }
 
