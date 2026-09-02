@@ -17,6 +17,7 @@ import (
 type Status string
 
 const (
+	defaultAuthBaseURL         = "https://auth.trakt.tv"
 	StatusNotConfigured Status = "not_configured"
 	StatusNotAuthorized Status = "not_authorized"
 	StatusPending       Status = "authorization_pending"
@@ -72,7 +73,7 @@ func NewService(db *sql.DB, cfg Config) *Service {
 		cfg.HTTPClient = http.DefaultClient
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.trakt.tv"
+		cfg.BaseURL = defaultAuthBaseURL
 	}
 	return &Service{db: db, cfg: cfg, secrets: cfg.SecretStore}
 }

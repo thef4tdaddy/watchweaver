@@ -51,6 +51,13 @@ func TestStatusStatesAndSecretRedaction(t *testing.T) {
 	}
 }
 
+func TestDefaultAuthenticationHost(t *testing.T) {
+	s := NewService(authDB(t), Config{})
+	if s.cfg.BaseURL != "https://auth.trakt.tv" {
+		t.Fatalf("authentication base URL = %q", s.cfg.BaseURL)
+	}
+}
+
 func TestDeviceAuthorizationPendingSlowDownSuccessAndRestart(t *testing.T) {
 	db := authDB(t)
 	ctx := context.Background()
