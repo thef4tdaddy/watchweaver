@@ -11,11 +11,12 @@ const (
 )
 
 type Episode struct {
-	ID       int64
-	Number   int
-	Released bool
-	Watched  bool
-	Normal   bool
+	ID                int64
+	Number            int
+	Released          bool
+	Watched           bool
+	PreviouslyWatched bool
+	Normal            bool
 }
 
 type SeasonState struct {
@@ -68,10 +69,14 @@ func Evaluate(batch Batch) []Decision {
 
 		allReleased := true
 		allReleasedWatched := true
+		newFirstWatch := false
 		var newestReleased *Episode
 		futureExpected := false
 		for i := range normal {
 			episode := &normal[i]
+			if newEpisodes[episode.ID] && episode.Watched && !episode.PreviouslyWatched {
+				newFirstWatch = true
+			}
 			if !episode.Released {
 				allReleased = false
 				futureExpected = true
@@ -86,14 +91,16 @@ func Evaluate(batch Batch) []Decision {
 		}
 
 		if allReleased && allReleasedWatched {
-			decisions = append(decisions, Decision{Kind: SeasonRating, MediaID: season.SeasonID})
+			if newFirstWatch {
+				decisions = append(decisions, Decision{Kind: SeasonRating, MediaID: season.SeasonID})
+			}
 			continue
 		}
 
 		if !allReleasedWatched || !futureExpected || newestReleased == nil || !newestReleased.Watched {
 			continue
 		}
-		if newEpisodes[newestReleased.ID] {
+		if newEpisodes[newestReleased.ID] && !newestReleased.PreviouslyWatched {
 			decisions = append(decisions, Decision{Kind: EpisodeRating, MediaID: newestReleased.ID})
 		}
 	}
