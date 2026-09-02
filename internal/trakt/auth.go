@@ -37,9 +37,10 @@ type SecretStore interface {
 }
 
 type PublicStatus struct {
-	Status          Status `json:"status"`
-	UserCode        string `json:"user_code,omitempty"`
-	VerificationURL string `json:"verification_url,omitempty"`
+	Status           Status `json:"status"`
+	UserCode         string `json:"user_code,omitempty"`
+	VerificationURL  string `json:"verification_url,omitempty"`
+	PollAfterSeconds int    `json:"poll_after_seconds,omitempty"`
 }
 
 type DeviceCode struct {
@@ -99,7 +100,7 @@ func (s *Service) status(ctx context.Context) PublicStatus {
 		return PublicStatus{Status: StatusNotConfigured}
 	}
 	if s.pending != nil {
-		return PublicStatus{Status: StatusPending, UserCode: s.pending.UserCode, VerificationURL: s.pending.VerificationURL}
+		return PublicStatus{Status: StatusPending, UserCode: s.pending.UserCode, VerificationURL: s.pending.VerificationURL, PollAfterSeconds: s.pending.Interval}
 	}
 	access, err := s.secret(ctx, "access_token")
 	if err == nil && access != "" {

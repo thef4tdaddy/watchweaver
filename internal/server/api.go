@@ -30,12 +30,14 @@ type API struct {
 	trakt             *trakt.Service
 	credentials       *credentials.Store
 	discord           *discord.Notifier
+	traktSync         *trakt.SyncManager
 	discordConfigured bool
 }
 
-func (a *API) SetDiscordConfigured(configured bool)          { a.discordConfigured = configured }
-func (a *API) SetCredentialStore(store *credentials.Store)   { a.credentials = store }
-func (a *API) SetDiscordNotifier(notifier *discord.Notifier) { a.discord = notifier }
+func (a *API) SetDiscordConfigured(configured bool)           { a.discordConfigured = configured }
+func (a *API) SetCredentialStore(store *credentials.Store)    { a.credentials = store }
+func (a *API) SetDiscordNotifier(notifier *discord.Notifier)  { a.discord = notifier }
+func (a *API) SetTraktSyncManager(manager *trakt.SyncManager) { a.traktSync = manager }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
 	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService}
@@ -90,6 +92,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/integrations/trakt/config", a.traktConfig)
 	mux.HandleFunc("/api/integrations/trakt/authorize", a.traktAuthorize)
 	mux.HandleFunc("/api/integrations/trakt/authorize/poll", a.traktPoll)
+	mux.HandleFunc("/api/integrations/trakt/sync", a.traktSyncNow)
 	mux.HandleFunc("/api/integrations/discord/config", a.discordConfig)
 	mux.HandleFunc("/api/integrations/discord/test", a.discordTest)
 	mux.HandleFunc("/api/letterboxd", a.letterboxdStatus)
@@ -775,7 +778,45 @@ func (a *API) integrationStatus(w http.ResponseWriter, r *http.Request) {
 	if a.discord != nil {
 		discordConfigured = a.discord.Configured()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[discordConfigured]}})
+	var syncStatus trakt.SyncStatus
+	if a.traktSync != nil {
+		syncStatus, err = a.traktSync.Status(r.Context())
+		if err != nil {
+			internalError(w)
+			return
+		}
+		syncStatus.CanSync = traktStatus.Status == trakt.StatusConnected
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus, "sync": syncStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[discordConfigured]}})
+}
+
+func (a *API) traktSyncNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if a.traktSync == nil {
+		writeError(w, http.StatusServiceUnavailable, "Trakt sync is unavailable")
+		return
+	}
+	if a.trakt == nil || a.trakt.Status(r.Context()).Status != trakt.StatusConnected {
+		conflict(w, "Trakt authorization is required")
+		return
+	}
+	if err := a.traktSync.SyncNow(r.Context()); err != nil {
+		if errors.Is(err, trakt.ErrSyncInProgress) {
+			conflict(w, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	status, err := a.traktSync.Status(r.Context())
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 func (a *API) traktAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -806,6 +847,9 @@ func (a *API) traktPoll(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	if status.Status == trakt.StatusConnected && a.traktSync != nil {
+		a.traktSync.Trigger()
 	}
 	writeJSON(w, http.StatusOK, status)
 }

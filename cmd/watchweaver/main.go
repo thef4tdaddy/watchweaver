@@ -81,6 +81,14 @@ func main() {
 		log.Fatalf("load Discord webhook failed: %v", err)
 	}
 	traktService := trakt.NewService(db, trakt.Config{ClientID: traktClientID, ClientSecret: traktClientSecret, BaseURL: cfg.TraktBaseURL, SecretStore: credentialStore})
+	traktSync := trakt.NewSyncManager(db, trakt.SyncManagerOptions{
+		BaseURL: cfg.TraktBaseURL, ClientID: traktClientID, Overlap: cfg.TraktPollOverlap,
+		AccessToken:      func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "access_token") },
+		ClientIDProvider: func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "client_id") },
+		Interval: func(ctx context.Context) time.Duration {
+			return applicationPollInterval(ctx, db, cfg.TraktPollInterval)
+		},
+	})
 	discordNotifier := discord.NewNotifier(db, discord.Options{})
 	discordEnabled, discordPreferenceSet := server.DiscordPreference(context.Background(), db)
 	if discordEnabled || (!discordPreferenceSet && cfg.DiscordWebhookURL != "") {
@@ -89,13 +97,17 @@ func main() {
 	api := server.NewAPI(db, traktService)
 	api.SetCredentialStore(credentialStore)
 	api.SetDiscordNotifier(discordNotifier)
+	api.SetTraktSyncManager(traktSync)
 	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, api))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	startTraktPoller(ctx, db, cfg, credentialStore)
-	startTraktRatingSync(ctx, db, cfg, credentialStore)
+	go func() {
+		if err := traktSync.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("Trakt sync manager stopped: %v", err)
+		}
+	}()
 	startDiscordNotifier(ctx, discordNotifier)
 
 	log.Printf("watchweaver listening on %s", listener.Addr().String())
@@ -107,53 +119,6 @@ func main() {
 
 func startDiscordNotifier(ctx context.Context, notifier *discord.Notifier) {
 	go func() { _ = notifier.Run(ctx) }()
-}
-
-func startTraktPoller(ctx context.Context, db *sql.DB, cfg config.Config, credentialStore *credentials.Store) {
-	syncer := trakt.NewHistorySync(db, trakt.HistorySyncOptions{
-		Poller: trakt.PollerOptions{
-			Interval: cfg.TraktPollInterval,
-			Overlap:  cfg.TraktPollOverlap,
-		},
-		ImporterFactory: func(accessToken string) trakt.HistorySyncImporter {
-			importer := trakt.NewHistoryImporter(db, cfg.TraktBaseURL, nil, accessToken)
-			clientID, _ := credentialStore.Get(context.Background(), "trakt", "client_id")
-			importer.SetClientID(clientID)
-			return importer
-		},
-		AccessToken: func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "access_token") },
-		PollInterval: func(ctx context.Context) time.Duration {
-			return applicationPollInterval(ctx, db, cfg.TraktPollInterval)
-		},
-	})
-
-	go func() {
-		if err := syncer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("trakt history poller stopped: %v", err)
-		}
-	}()
-}
-
-func startTraktRatingSync(ctx context.Context, db *sql.DB, cfg config.Config, credentialStore *credentials.Store) {
-	go func() {
-		for {
-			clientID, _ := credentialStore.Get(ctx, "trakt", "client_id")
-			accessToken, _ := credentialStore.Get(ctx, "trakt", "access_token")
-			if clientID != "" && accessToken != "" {
-				syncer := trakt.NewRatingSync(db, cfg.TraktBaseURL, nil, clientID, accessToken)
-				_ = syncer.ImportInitial(ctx)
-				_ = syncer.FlushPending(ctx)
-				_ = syncer.Reconcile(ctx)
-			}
-			timer := time.NewTimer(applicationPollInterval(ctx, db, cfg.TraktPollInterval))
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-		}
-	}()
 }
 
 func applicationPollInterval(ctx context.Context, db *sql.DB, fallback time.Duration) time.Duration {

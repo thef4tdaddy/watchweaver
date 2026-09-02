@@ -618,6 +618,7 @@ function SettingsView({
 }) {
   const [settings, setSettings] = useState<Settings>();
   const [authBusy, setAuthBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -645,6 +646,39 @@ function SettingsView({
       onError((e as Error).message);
     } finally {
       setAuthBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (integrations?.trakt.authorization.status !== "authorization_pending")
+      return;
+    const timer = window.setInterval(
+      () => {
+        void request("/api/integrations/trakt/authorize/poll", {
+          method: "POST",
+        })
+          .then(refreshIntegrations)
+          .catch((e) => onError(e.message));
+      },
+      Math.max(1, integrations.trakt.authorization.poll_after_seconds ?? 5) *
+        1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [
+    integrations?.trakt.authorization.status,
+    integrations?.trakt.authorization.poll_after_seconds,
+    onError,
+    refreshIntegrations,
+  ]);
+  const syncNow = async () => {
+    setSyncBusy(true);
+    try {
+      await request("/api/integrations/trakt/sync", { method: "POST" });
+      refreshIntegrations();
+    } catch (e) {
+      onError((e as Error).message);
+      refreshIntegrations();
+    } finally {
+      setSyncBusy(false);
     }
   };
   if (!settings || !integrations) return <Loading />;
@@ -702,6 +736,43 @@ function SettingsView({
             {trakt.poll.last_error && (
               <small className="warning">
                 Latest sync error: {trakt.poll.last_error}
+              </small>
+            )}
+            <button
+              className="primary"
+              disabled={syncBusy || trakt.sync.running || !trakt.sync.can_sync}
+              onClick={() => void syncNow()}
+            >
+              {syncBusy || trakt.sync.running
+                ? "Syncing…"
+                : trakt.sync.retry_allowed
+                  ? "Retry sync"
+                  : "Sync now"}
+            </button>
+            {trakt.sync.last_result && (
+              <div className="sync-summary">
+                <p>
+                  Last completed:{" "}
+                  {formatDate(trakt.sync.last_result.completed_at)}
+                </p>
+                <p>
+                  {trakt.sync.last_result.history_changes} history change(s),{" "}
+                  {trakt.sync.last_result.rating_changes} rating change(s),{" "}
+                  {trakt.sync.last_result.pending_ratings_completed} pending
+                  rating(s) sent.
+                </p>
+                {trakt.sync.last_result.pending_ratings_remaining > 0 && (
+                  <p>
+                    {trakt.sync.last_result.pending_ratings_remaining} rating(s)
+                    still awaiting sync.
+                  </p>
+                )}
+              </div>
+            )}
+            <p>Next scheduled run: {formatDate(trakt.sync.next_run)}</p>
+            {trakt.sync.last_error && (
+              <small className="warning">
+                Latest full-sync error: {trakt.sync.last_error}
               </small>
             )}
           </div>
