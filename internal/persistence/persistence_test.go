@@ -223,6 +223,37 @@ func TestWritesWaitForConcurrentWriter(t *testing.T) {
 	}
 }
 
+func TestReadThenWriteTransactionReservesWriter(t *testing.T) {
+	db, err := OpenAndMigrate(Options{Path: filepath.Join(t.TempDir(), "watchweaver.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM app_metadata`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	competing := make(chan error, 1)
+	go func() {
+		_, execErr := db.Exec(`INSERT INTO app_metadata(key,value) VALUES('background-sync','done')`)
+		competing <- execErr
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := tx.Exec(`INSERT INTO app_metadata(key,value) VALUES('export','done')`); err != nil {
+		t.Fatalf("read transaction could not promote to writer: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-competing; err != nil {
+		t.Fatalf("competing writer did not wait: %v", err)
+	}
+}
+
 func TestRunMigrationsErrorsForInvalidMigrationName(t *testing.T) {
 	db := openTestDB(t)
 	migrationsFS := fstest.MapFS{

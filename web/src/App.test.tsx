@@ -72,6 +72,7 @@ beforeEach(() => {
           pending_changes: 2,
           pending_episode_watches: 2,
           pending_rating_changes: 0,
+          tracked_episode_watches: 42,
           count_threshold_reached: false,
           elapsed_threshold_reached: false,
           due: false,
@@ -89,6 +90,8 @@ beforeEach(() => {
           generated_batches: 0,
         });
       if (path === "/api/letterboxd/batches") return json({ items: [] });
+      if (path === "/api/serializd/mark-synced" && init?.method === "POST")
+        return json({});
       if (path === "/api/integrations/trakt/sync" && init?.method === "POST")
         return json({ running: false });
       if (path === "/api/status")
@@ -168,6 +171,8 @@ describe("WatchWeaver dashboard", () => {
     expect(
       await screen.findByText("Television is in rhythm"),
     ).toBeInTheDocument();
+    expect(screen.getByText("42")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark synced" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(
       await screen.findByText("Integration availability"),

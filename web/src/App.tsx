@@ -40,6 +40,10 @@ function App() {
   useEffect(() => {
     void refreshIntegrations();
   }, [refreshIntegrations]);
+  useEffect(() => {
+    const timer = window.setInterval(() => void refreshIntegrations(), 3000);
+    return () => window.clearInterval(timer);
+  }, [refreshIntegrations]);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -94,7 +98,13 @@ function App() {
             <button onClick={() => setError("")}>×</button>
           </div>
         )}
-        {view === "inbox" && <Inbox onError={setError} />}{" "}
+        {view === "inbox" && (
+          <Inbox
+            onError={setError}
+            syncRunning={integrations?.trakt.sync.running === true}
+            syncPhase={integrations?.trakt.poll.phase}
+          />
+        )}{" "}
         {view === "history" && <History onError={setError} />}{" "}
         {view === "movies" && <Movies onError={setError} />}{" "}
         {view === "tv" && <Television onError={setError} />}{" "}
@@ -278,7 +288,7 @@ function mediaLabel(media: Task["media"]) {
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 
-function Inbox({ onError }: { onError: (value: string) => void }) {
+function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string }) {
   const [page, setPage] = useState<Page<Task>>();
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const [drafts, setDrafts] = useState<
@@ -354,7 +364,8 @@ function Inbox({ onError }: { onError: (value: string) => void }) {
           Refresh
         </button>
       </div>
-      {page.items.length === 0 ? (
+      {syncRunning && <SyncProgress phase={syncPhase} />}
+      {page.items.length === 0 && !syncRunning ? (
         <Empty
           title="You’re all caught up"
           body="New rating and review prompts will appear here after Trakt activity is processed."
@@ -653,6 +664,7 @@ function Movies({ onError }: { onError: (v: string) => void }) {
 
 function Television({ onError }: { onError: (v: string) => void }) {
   const [status, setStatus] = useState<SerializdStatus>();
+  const [marking, setMarking] = useState(false);
   const load = useCallback(
     () =>
       request<SerializdStatus>("/api/serializd")
@@ -664,11 +676,14 @@ function Television({ onError }: { onError: (v: string) => void }) {
     void load();
   }, [load]);
   const mark = async () => {
+    setMarking(true);
     try {
       await request("/api/serializd/mark-synced", { method: "POST" });
       await load();
     } catch (e) {
       onError((e as Error).message);
+    } finally {
+      setMarking(false);
     }
   };
   if (!status) return <Loading />;
@@ -699,17 +714,18 @@ function Television({ onError }: { onError: (v: string) => void }) {
           </a>
           <button
             className="secondary"
-            disabled={!status.pending_changes}
+            disabled={marking}
             onClick={() => void mark()}
           >
-            Mark synced
+            {marking ? "Saving…" : "Mark synced"}
           </button>
         </div>
       </div>
       <div className="metric-grid">
+        <Metric value={status.tracked_episode_watches} label="Episodes tracked" />
         <Metric
           value={status.pending_episode_watches}
-          label="Episode watches"
+          label="New episode watches"
         />
         <Metric value={status.pending_rating_changes} label="Rating changes" />
         <Metric
@@ -721,6 +737,16 @@ function Television({ onError }: { onError: (v: string) => void }) {
           label="Last confirmed"
         />
       </div>
+      {!status.last_confirmed_at && status.tracked_episode_watches > 0 && (
+        <div className="notice">
+          <strong>Imported history is ready</strong>
+          <p>
+            Existing Trakt history is your starting baseline, so it is tracked
+            without being counted as new. After running the Serializd importer,
+            choose Mark synced to start counting changes from today.
+          </p>
+        </div>
+      )}
       {(status.unsupported_season_ratings > 0 ||
         status.unsupported_tv_reviews > 0) && (
         <div className="notice">
@@ -895,6 +921,9 @@ function SettingsView({
                   ? "Retry sync"
                   : "Sync now"}
             </button>
+            {(syncBusy || trakt.sync.running) && (
+              <SyncProgress phase={trakt.poll.phase} />
+            )}
             {trakt.sync.last_result && (
               <div className="sync-summary">
                 <p>
@@ -1102,6 +1131,23 @@ function Empty({ title, body }: { title: string; body: string }) {
       <span>✓</span>
       <h3>{title}</h3>
       <p>{body}</p>
+    </div>
+  );
+}
+function SyncProgress({ phase }: { phase?: string }) {
+  return (
+    <div className="sync-progress" role="status" aria-live="polite">
+      <div>
+        <strong>Syncing with Trakt…</strong>
+        <span>{humanStatus(phase || "processing activity")}</span>
+      </div>
+      <div className="sync-progress-track" aria-hidden="true">
+        <span />
+      </div>
+      <small>
+        Large first imports can take a while. New prompts will appear here as
+        processing finishes.
+      </small>
     </div>
   );
 }

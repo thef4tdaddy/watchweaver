@@ -66,3 +66,23 @@ func TestSyncManagerReportsRetryAndRejectsConcurrentRun(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestSyncManagerWaitsOnlyForRemainingIntervalAfterRestart(t *testing.T) {
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "sync-manager.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Date(2026, 9, 2, 19, 0, 0, 0, time.UTC)
+	completed := now.Add(-2 * time.Minute).Format(time.RFC3339Nano)
+	if _, err := db.Exec(`INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','sync_last_completed',?)`, completed); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewSyncManager(db, SyncManagerOptions{Now: func() time.Time { return now }})
+	if delay := manager.nextDelay(context.Background(), 5*time.Minute); delay != 3*time.Minute {
+		t.Fatalf("delay=%s", delay)
+	}
+	if delay := manager.nextDelay(context.Background(), time.Minute); delay != 0 {
+		t.Fatalf("overdue delay=%s", delay)
+	}
+}
