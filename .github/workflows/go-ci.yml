@@ -24,6 +24,8 @@ jobs:
         run: go mod tidy
       - name: Go vet
         run: go vet ./...
+      - name: Privacy and artifact check
+        run: scripts/check-release-privacy.sh
       - name: Go test with coverage
         run: go test -covermode=atomic -coverprofile=coverage.out ./...
       - name: Race detection for non-SQLite packages
