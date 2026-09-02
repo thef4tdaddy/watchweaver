@@ -2,6 +2,8 @@
 
 **Self-hosted watch history, ratings, and reviews across Trakt, Letterboxd, Serializd, and Discord.**
 
+![WatchWeaver logo, icon treatments, and color palette](docs/assets/watchweaver-brand-guide.png)
+
 > [!IMPORTANT]
 > WatchWeaver is currently in early development. The architecture and feature set may change significantly before the first release.
 

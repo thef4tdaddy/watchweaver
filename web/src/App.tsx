@@ -44,7 +44,7 @@ function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">W</span>
+          <img className="brand-mark" src="/brand/watchweaver-icon.png" alt="" />
           <div>
             <strong>WatchWeaver</strong>
             <small>Your watch life, in sync.</small>

@@ -6,6 +6,11 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 const json=(body:unknown,status=200)=>Promise.resolve(new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}}))
 
 describe('first-run setup',()=>{
+  it('shows the branded startup artwork while setup status loads',()=>{
+    vi.stubGlobal('fetch',vi.fn(()=>new Promise(()=>{})))
+    render(<SetupGate/>);expect(screen.getByRole('img',{name:'WatchWeaver'})).toHaveAttribute('src','/brand/watchweaver-splash.png')
+  })
+
   it('stores write-only Trakt credentials and completes device authorization',async()=>{
     const fetchMock=vi.fn((input:RequestInfo|URL)=>{const path=String(input)
       if(path==='/api/setup')return json({complete:false,encrypted_storage:true,trakt:{configured:false,authorization_status:'not_configured',client_id_overridden:false,client_secret_overridden:false},discord:{configured:false,enabled:false,webhook_overridden:false}})
