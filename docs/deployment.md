@@ -33,7 +33,12 @@ Supported release architectures for v0.1:
 - `linux/amd64`
 - `linux/arm64`
 
-Release tags should include an immutable version tag. A moving convenience tag such as `latest` may also be published, but production documentation should encourage explicit version tags for predictable upgrades.
+Release tags include an immutable version tag and commit-SHA tag. WatchWeaver publishes two moving channels:
+
+- Git tags such as `v0.1.0-beta.1` update the container tag `beta`.
+- Stable Git tags such as `v0.1.0` update the container tag `latest` and the stable minor tag such as `0.1`.
+
+Beta releases never update `latest`. Production deployments should prefer an immutable version tag for predictable upgrades.
 
 ## Network behavior
 
