@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/thef4tdaddy/watchweaver/internal/letterboxd"
 	"github.com/thef4tdaddy/watchweaver/internal/ratings"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
 )
@@ -18,13 +20,14 @@ import (
 const maxRequestBody = 1 << 20
 
 type API struct {
-	db      *sql.DB
-	ratings *ratings.Service
-	trakt   *trakt.Service
+	db         *sql.DB
+	ratings    *ratings.Service
+	letterboxd *letterboxd.Service
+	trakt      *trakt.Service
 }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
-	return &API{db: db, ratings: ratings.NewService(db), trakt: traktService}
+	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), trakt: traktService}
 }
 
 type mediaJSON struct {
@@ -74,6 +77,126 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/integrations", a.integrationStatus)
 	mux.HandleFunc("/api/integrations/trakt/authorize", a.traktAuthorize)
 	mux.HandleFunc("/api/integrations/trakt/authorize/poll", a.traktPoll)
+	mux.HandleFunc("/api/letterboxd", a.letterboxdStatus)
+	mux.HandleFunc("/api/letterboxd/batches", a.letterboxdGenerate)
+	mux.HandleFunc("/api/letterboxd/batches/", a.letterboxdBatch)
+}
+
+func (a *API) letterboxdStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	settings, err := a.loadSettings(r.Context())
+	if err != nil {
+		internalError(w)
+		return
+	}
+	status, err := a.letterboxd.Status(r.Context(), settings.Timezone)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *API) letterboxdGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		batches, err := a.letterboxd.ListBatches(r.Context())
+		if err != nil {
+			internalError(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": batches})
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	settings, err := a.loadSettings(r.Context())
+	if err != nil {
+		internalError(w)
+		return
+	}
+	batch, err := a.letterboxd.Generate(r.Context(), settings.Timezone)
+	if errors.Is(err, letterboxd.ErrNothingPending) {
+		conflict(w, err.Error())
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusCreated, batch)
+}
+
+func (a *API) letterboxdBatch(w http.ResponseWriter, r *http.Request) {
+	parts := pathParts(r.URL.Path, "/api/letterboxd/batches/")
+	if len(parts) < 1 {
+		notFound(w)
+		return
+	}
+	id, ok := positiveID(w, parts[0])
+	if !ok {
+		return
+	}
+	if len(parts) == 1 && r.Method == http.MethodGet {
+		batch, err := a.letterboxd.GetBatch(r.Context(), id)
+		if errors.Is(err, letterboxd.ErrBatchNotFound) {
+			notFound(w)
+			return
+		}
+		if err != nil {
+			internalError(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, batch)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "confirm" && r.Method == http.MethodPost {
+		batch, err := a.letterboxd.Confirm(r.Context(), id)
+		if errors.Is(err, letterboxd.ErrBatchNotFound) {
+			notFound(w)
+			return
+		}
+		if errors.Is(err, letterboxd.ErrBatchConfirmed) {
+			conflict(w, err.Error())
+			return
+		}
+		if err != nil {
+			internalError(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, batch)
+		return
+	}
+	if len(parts) == 3 && parts[1] == "files" && r.Method == http.MethodGet {
+		part, err := strconv.Atoi(parts[2])
+		if err != nil || part < 1 {
+			badRequest(w, "part must be a positive integer")
+			return
+		}
+		file, err := a.letterboxd.GetFile(r.Context(), id, part)
+		if errors.Is(err, letterboxd.ErrBatchNotFound) {
+			notFound(w)
+			return
+		}
+		if err != nil {
+			internalError(w)
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file.Filename))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(file.Content)
+		return
+	}
+	if (len(parts) == 1 || len(parts) == 2 || len(parts) == 3) && r.Method != http.MethodGet && r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	notFound(w)
 }
 
 func (a *API) inbox(w http.ResponseWriter, r *http.Request) {
@@ -538,7 +661,7 @@ func (a *API) integrationStatus(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": false, "status": "disabled"}, "discord": map[string]any{"enabled": false, "status": "disabled"}})
+	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": false, "status": "disabled"}})
 }
 func (a *API) traktAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
