@@ -6,8 +6,11 @@ import (
 	"errors"
 	"log"
 	"net"
+	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/config"
 	"github.com/thef4tdaddy/watchweaver/internal/discord"
@@ -18,6 +21,27 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if len(os.Args) > 1 {
+		if os.Args[1] != "backup" {
+			log.Fatalf("unknown command %q (supported: backup)", os.Args[1])
+		}
+		destination := ""
+		if len(os.Args) > 2 {
+			destination = os.Args[2]
+		} else {
+			destination = filepath.Join(filepath.Dir(cfg.DatabasePath), "backups", "watchweaver-"+time.Now().UTC().Format("20060102T150405Z")+".db")
+		}
+		db, err := persistence.OpenAndMigrate(persistence.Options{Path: cfg.DatabasePath})
+		if err != nil {
+			log.Fatalf("open database for backup: %v", err)
+		}
+		defer db.Close()
+		if err := persistence.Backup(db, destination); err != nil {
+			log.Fatalf("backup failed: %v", err)
+		}
+		log.Printf("backup created: %s", destination)
+		return
+	}
 	readiness := server.NewReadiness()
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

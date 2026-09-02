@@ -1,6 +1,7 @@
 package server
 
 import (
+	"embed"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -9,6 +10,12 @@ import (
 	"strings"
 	"sync"
 )
+
+// embeddedStatic contains the production frontend in release builds. The
+// Docker build replaces the checked-in fallback with Vite's compiled output.
+//
+//go:embed static
+var embeddedStatic embed.FS
 
 type healthResponse struct {
 	Status string `json:"status"`
@@ -63,7 +70,11 @@ func newHandlerWithAPI(readiness *Readiness, staticAssets fs.FS, api *API) http.
 
 func discoverStaticAssetsFS() fs.FS {
 	if _, err := os.Stat("web/dist/index.html"); err != nil {
-		return nil
+		static, subErr := fs.Sub(embeddedStatic, "static")
+		if subErr != nil {
+			return nil
+		}
+		return static
 	}
 	return os.DirFS("web/dist")
 }
