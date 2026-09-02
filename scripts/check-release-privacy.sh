@@ -15,7 +15,9 @@ if printf '%s\n' "$tracked" | grep -E '(^|/)\.env($|\.)' | grep -v '^\.env\.exam
   exit 1
 fi
 
-if git grep -nE '(/Users/[^ ]+|/home/[^ ]+|[A-Za-z]:\\Users\\|discord(app)?\.com/api/webhooks/[0-9]+/[^[:space:]]+)' -- ':!scripts/check-release-privacy.sh' >/dev/null; then
+findings="$(git grep -nE "(^|[[:space:]=\"'])(/Users/|/home/)|[A-Za-z]:\\\\Users\\\\|discord(app)?\\.com/api/webhooks/[0-9]+/[^[:space:]]+" -- ':!scripts/check-release-privacy.sh' || true)"
+if [ -n "$findings" ]; then
+  printf '%s\n' "$findings" >&2
   echo "possible personal path or live Discord webhook found in tracked files" >&2
   exit 1
 fi
