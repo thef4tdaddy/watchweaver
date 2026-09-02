@@ -36,9 +36,9 @@ type Poller struct {
 }
 
 type PollStatus struct {
-	LastSuccess         *time.Time
-	LastError           string
-	ConsecutiveFailures int
+	LastSuccess         *time.Time `json:"last_success,omitempty"`
+	LastError           string     `json:"last_error,omitempty"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
 }
 
 func NewPoller(db *sql.DB, importer IncrementalImporter, o PollerOptions) *Poller {
