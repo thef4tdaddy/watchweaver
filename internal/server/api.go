@@ -21,12 +21,15 @@ import (
 const maxRequestBody = 1 << 20
 
 type API struct {
-	db         *sql.DB
-	ratings    *ratings.Service
-	letterboxd *letterboxd.Service
-	serializd  *serializd.Service
-	trakt      *trakt.Service
+	db                *sql.DB
+	ratings           *ratings.Service
+	letterboxd        *letterboxd.Service
+	serializd         *serializd.Service
+	trakt             *trakt.Service
+	discordConfigured bool
 }
+
+func (a *API) SetDiscordConfigured(configured bool) { a.discordConfigured = configured }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
 	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService}
@@ -709,7 +712,7 @@ func (a *API) integrationStatus(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": false, "status": "disabled"}})
+	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": a.discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[a.discordConfigured]}})
 }
 func (a *API) traktAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

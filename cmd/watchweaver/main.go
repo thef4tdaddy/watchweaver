@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/thef4tdaddy/watchweaver/internal/config"
+	"github.com/thef4tdaddy/watchweaver/internal/discord"
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 	"github.com/thef4tdaddy/watchweaver/internal/server"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
@@ -31,18 +32,29 @@ func main() {
 	defer db.Close()
 
 	traktService := trakt.NewService(db, trakt.Config{ClientID: cfg.TraktClientID, ClientSecret: cfg.TraktClientSecret, BaseURL: cfg.TraktBaseURL})
-	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, server.NewAPI(db, traktService)))
+	api := server.NewAPI(db, traktService)
+	api.SetDiscordConfigured(cfg.DiscordWebhookURL != "")
+	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, api))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	startTraktPoller(ctx, db, cfg)
+	startDiscordNotifier(ctx, db, cfg)
 
 	log.Printf("watchweaver listening on %s", listener.Addr().String())
 
 	if err := server.Serve(ctx, httpServer, listener, cfg.ShutdownTimeout); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("server failed: %v", err)
 	}
+}
+
+func startDiscordNotifier(ctx context.Context, db *sql.DB, cfg config.Config) {
+	if cfg.DiscordWebhookURL == "" {
+		return
+	}
+	notifier := discord.NewNotifier(db, discord.Options{WebhookURL: cfg.DiscordWebhookURL})
+	go func() { _ = notifier.Run(ctx) }()
 }
 
 func startTraktPoller(ctx context.Context, db *sql.DB, cfg config.Config) {
