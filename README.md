@@ -65,6 +65,8 @@ docker compose up -d
 
 Open `http://localhost:8080`. Compose stores the database, backups, and retained exports in the named `watchweaver-data` volume. Pin `ghcr.io/thef4tdaddy/watchweaver:<version>` in `compose.yaml` for predictable production upgrades.
 
+Published container channels are `beta` for prerelease testing and `latest` for stable releases. Immutable tags such as `0.1.0-beta.1` or `0.1.0` are recommended when you want upgrades to be explicit.
+
 ### Back up and restore
 
 Create a consistent live SQLite backup without stopping the service:
