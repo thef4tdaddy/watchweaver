@@ -47,9 +47,9 @@ Default container port:
 
 The listen address and externally published host port may be configured without changing application behavior.
 
-v0.1 is designed primarily for a trusted home/LAN environment or deployment behind an existing authenticated reverse proxy/VPN.
+v0.1 is supported only on a trusted home/LAN, through a private VPN, or behind an existing authenticated reverse proxy. Network access control is part of the required deployment boundary.
 
-WatchWeaver v0.1 must not encourage exposing the application directly to the public internet without an appropriate authentication/access-control layer.
+Do not publish the WatchWeaver listener directly to the public internet. Direct public exposure is unsupported because any client that can reach the application can access private viewing data and administrative controls.
 
 Application-native multi-user authentication is outside the v0.1 foundation unless added through a later design issue.
 

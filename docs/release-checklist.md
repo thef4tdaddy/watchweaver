@@ -24,7 +24,7 @@ Run this checklist from a clean checkout before creating a release tag. It compl
 
 ## Privacy and release artifacts
 
+- [ ] Confirm the deployment is reachable only from the intended LAN/VPN or through an authenticated reverse proxy; the application port is not directly exposed to the public internet.
 - [ ] Review the PR diff and image history. No real credentials, tokens, webhook URLs, user/home/NAS paths, IDs, viewing data, databases, exports, or logs are present.
 - [ ] Confirm normal API responses and rendered settings contain only public authorization instructions and integration status—not device codes, access/refresh tokens, client secrets, or webhook URLs.
 - [ ] Create a fresh application backup and retain the pre-upgrade image tag. Do not tag the release while a known data-loss, duplicate-event, rating-snapshot, secret-leak, or notification-flood defect remains.
-
