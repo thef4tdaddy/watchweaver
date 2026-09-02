@@ -91,6 +91,49 @@ beforeEach(() => {
       if (path === "/api/letterboxd/batches") return json({ items: [] });
       if (path === "/api/integrations/trakt/sync" && init?.method === "POST")
         return json({ running: false });
+      if (path === "/api/status")
+        return json({
+          overall: "needs_attention",
+          checked_at: "2026-09-02T12:00:00Z",
+          components: {
+            trakt: {
+              state: "working",
+              label: "Trakt",
+              detail: "Connected and ready to synchronize.",
+              action: "sync",
+            },
+            discord: {
+              state: "disabled",
+              label: "Discord",
+              detail: "Optional announcements are disabled.",
+              action: "configure",
+            },
+            letterboxd: {
+              state: "working",
+              label: "Letterboxd",
+              detail: "No movie exports are waiting.",
+              action: "open",
+            },
+            serializd: {
+              state: "working",
+              label: "Serializd",
+              detail: "Reminder thresholds have not been reached.",
+              action: "open",
+            },
+            database: {
+              state: "working",
+              label: "Database",
+              detail: "Persistent storage is available.",
+              action: "diagnostics",
+            },
+          },
+          backup: {
+            state: "needs_attention",
+            label: "Backups",
+            detail: "No application backup was found.",
+            action: "instructions",
+          },
+        });
       if (path.startsWith("/api/tasks/") && init?.method === "POST")
         return json({ state: "completed" });
       return json({ error: "not found" }, 404);
@@ -155,5 +198,26 @@ describe("WatchWeaver dashboard", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+  });
+  it("shows operational status and runs its recovery action", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /Status/ }));
+    expect(
+      await screen.findByText("Some items need attention"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No application backup was found."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/integrations/trakt/sync",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(
+      screen.getByRole("link", { name: "Download diagnostics" }),
+    ).toHaveAttribute("href", "/api/diagnostics");
   });
 });

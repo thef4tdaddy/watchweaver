@@ -65,6 +65,10 @@ Open `http://localhost:8080` and follow the first-run wizard to enter Trakt cred
 
 The Settings page can run Trakt synchronization immediately, retry a failed cycle, and show its last result and next scheduled run. Device authorization is checked automatically while the Trakt code is displayed.
 
+The Status page summarizes integrations, local storage, and backup freshness in
+plain language, provides the relevant recovery action, and can download a
+redacted diagnostics report for troubleshooting.
+
 Published container channels are `beta` for prerelease testing and `latest` for stable releases. Immutable tags such as `0.1.0-beta.1` or `0.1.0` are recommended when you want upgrades to be explicit.
 
 ### Back up and restore
