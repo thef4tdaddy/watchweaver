@@ -50,6 +50,27 @@ func OpenAndMigrate(opts Options) (*sql.DB, error) {
 	return db, nil
 }
 
+// Backup writes a transactionally consistent SQLite snapshot. The destination
+// must not already exist, which prevents an operator from overwriting a known-
+// good backup by mistake.
+func Backup(db *sql.DB, destination string) error {
+	if strings.TrimSpace(destination) == "" {
+		return fmt.Errorf("backup destination is required")
+	}
+	if _, err := os.Stat(destination); err == nil {
+		return fmt.Errorf("backup destination already exists: %s", destination)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect backup destination: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
+		return fmt.Errorf("create backup directory: %w", err)
+	}
+	if _, err := db.Exec("VACUUM INTO ?", destination); err != nil {
+		return fmt.Errorf("create consistent SQLite backup: %w", err)
+	}
+	return nil
+}
+
 func openSQLite(dbPath string) (*sql.DB, error) {
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {

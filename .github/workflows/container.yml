@@ -1,0 +1,44 @@
+name: Container
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: watchweaver:test
+      - name: Verify startup, readiness, persistence, and backup
+        run: |
+          docker volume create watchweaver-ci
+          docker run -d --name watchweaver-ci -p 18080:8080 -v watchweaver-ci:/data watchweaver:test
+          for attempt in $(seq 1 30); do
+            wget -qO- http://127.0.0.1:18080/readyz && break
+            sleep 1
+          done
+          wget -qO- http://127.0.0.1:18080/readyz
+          docker exec watchweaver-ci watchweaver backup /data/backups/ci.db
+          docker stop watchweaver-ci
+          docker rm watchweaver-ci
+          docker run --rm -v watchweaver-ci:/data alpine:3.22 sh -c 'mv /data/watchweaver.db /data/pre-restore.db && cp /data/backups/ci.db /data/watchweaver.db && rm -f /data/watchweaver.db-wal /data/watchweaver.db-shm && chown -R 10001:10001 /data'
+          docker run -d --name watchweaver-ci-restored -p 18080:8080 -v watchweaver-ci:/data watchweaver:test
+          for attempt in $(seq 1 30); do
+            wget -qO- http://127.0.0.1:18080/readyz && break
+            sleep 1
+          done
+          wget -qO- http://127.0.0.1:18080/api/settings
+          docker exec watchweaver-ci-restored test -s /data/pre-restore.db

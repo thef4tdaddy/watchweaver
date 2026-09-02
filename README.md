@@ -50,11 +50,40 @@ Trakt is intended to provide automated viewing activity. WatchWeaver maintains i
 - **Portable data.** Watch history, ratings, reviews, and export state should not exist only inside one third-party service.
 - **Privacy by default.** Credentials, databases, watch history, generated exports, logs, and instance-specific configuration must never be required in the repository.
 
-## Status
+## Install with Docker Compose
 
-WatchWeaver is currently **pre-alpha / planning**. There is no usable release yet.
+WatchWeaver is designed for a trusted LAN or an authenticated reverse proxy/VPN. Do not expose it directly to the public internet.
 
-Development will be planned publicly through GitHub issues before implementation begins.
+```bash
+git clone https://github.com/thef4tdaddy/watchweaver.git
+cd watchweaver
+cp .env.example .env
+# Add your own Trakt client credentials to .env, then:
+docker compose up -d
+```
+
+Open `http://localhost:8080`. Compose stores the database, backups, and retained exports in the named `watchweaver-data` volume. Pin `ghcr.io/thef4tdaddy/watchweaver:<version>` in `compose.yaml` for predictable production upgrades.
+
+### Back up and restore
+
+Create a consistent live SQLite backup without stopping the service:
+
+```bash
+docker compose exec watchweaver watchweaver backup
+```
+
+Backups are written beneath `/data/backups`. To restore, first stop WatchWeaver, copy a known-good backup over `/data/watchweaver.db` inside the persistent volume, remove any old `watchweaver.db-wal` and `watchweaver.db-shm` files, and restart the same or a compatible newer image. Never replace the database while WatchWeaver is running.
+
+### Upgrade
+
+Create a backup, update the pinned image version, then run:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The same `/data` volume is reused and pending migrations run before readiness succeeds. Downgrades are not guaranteed; restore the pre-upgrade backup with the compatible version instead.
 
 ## Local development commands
 

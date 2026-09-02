@@ -221,6 +221,38 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func TestBackupCreatesConsistentRestorableSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenAndMigrate(Options{Path: filepath.Join(dir, "live.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`INSERT INTO app_metadata(key, value) VALUES ('backup-test', 'preserved')`); err != nil {
+		t.Fatal(err)
+	}
+
+	backupPath := filepath.Join(dir, "backups", "snapshot.db")
+	if err := Backup(db, backupPath); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := sql.Open("sqlite", "file:"+filepath.ToSlash(backupPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	var value string
+	if err := restored.QueryRow(`SELECT value FROM app_metadata WHERE key = 'backup-test'`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != "preserved" {
+		t.Fatalf("expected preserved value, got %q", value)
+	}
+	if err := Backup(db, backupPath); err == nil {
+		t.Fatal("expected existing destination to be rejected")
+	}
+}
+
 func assertTableExists(t *testing.T, db *sql.DB, name string) {
 	t.Helper()
 	var tableName string

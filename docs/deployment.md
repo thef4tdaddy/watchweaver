@@ -166,6 +166,24 @@ Before significant schema upgrades, WatchWeaver should create or strongly suppor
 
 v0.1 restoration may be documented as an administrative operation: stop WatchWeaver, replace the database with a known-good consistent backup, then restart on a compatible application version.
 
+Create a consistent online backup with the application command:
+
+```bash
+docker compose exec watchweaver watchweaver backup
+```
+
+The default filename is UTC timestamped beneath `/data/backups`. An explicit destination beneath the persistent volume can be supplied as the second argument. Existing files are never overwritten.
+
+### Restore procedure
+
+1. Stop the service with `docker compose down`.
+2. Retain the current database until the backup has been verified.
+3. Inside the `watchweaver-data` volume, copy the selected consistent backup to `/data/watchweaver.db` and remove stale `watchweaver.db-wal` and `watchweaver.db-shm` sidecars.
+4. Start the same application version that created the backup, or a documented compatible newer version, with `docker compose up -d`.
+5. Wait for `/readyz` and verify history and settings in the dashboard.
+
+Do not replace or copy the live database file while WatchWeaver is running. Downgrading an already migrated database is unsupported; restore a pre-upgrade backup instead.
+
 ## Health and readiness
 
 Expose lightweight unauthenticated operational endpoints suitable for container health checks:
