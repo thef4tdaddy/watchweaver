@@ -32,6 +32,9 @@ func TestCountThresholdAndTransferableChanges(t *testing.T) {
 	if status.UnsupportedSeasonRatings != 1 || status.UnsupportedTVReviews != 1 {
 		t.Fatalf("unsupported=%+v", status)
 	}
+	if status.ImportURL != "https://www.serializd.com/trakt" {
+		t.Fatalf("import URL=%q", status.ImportURL)
+	}
 }
 
 func TestBaselineAndSeasonActivityDoNotCount(t *testing.T) {

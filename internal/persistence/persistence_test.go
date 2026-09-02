@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func TestOpenAndMigrateFreshDatabase(t *testing.T) {
@@ -182,6 +183,43 @@ func TestOpenAndMigrateRequestsWALMode(t *testing.T) {
 	}
 	if strings.ToLower(mode) != "wal" {
 		t.Fatalf("expected journal mode wal, got %q", mode)
+	}
+	var busyTimeout int
+	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatalf("read busy timeout: %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Fatalf("expected 5000ms busy timeout, got %d", busyTimeout)
+	}
+}
+
+func TestWritesWaitForConcurrentWriter(t *testing.T) {
+	db, err := OpenAndMigrate(Options{Path: filepath.Join(t.TempDir(), "watchweaver.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO app_metadata(key,value) VALUES('writer-one','active')`); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		close(started)
+		_, execErr := db.Exec(`INSERT INTO app_metadata(key,value) VALUES('writer-two','waited')`)
+		result <- execErr
+	}()
+	<-started
+	time.Sleep(50 * time.Millisecond)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatalf("second writer did not wait: %v", err)
 	}
 }
 
