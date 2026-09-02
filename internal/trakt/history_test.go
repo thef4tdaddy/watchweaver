@@ -3,12 +3,14 @@ package trakt
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 )
@@ -16,7 +18,9 @@ import (
 func TestHistoryImporterPaginationHierarchyAndBaseline(t *testing.T) {
 	db := testHistoryDB(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer token" { t.Errorf("missing bearer token") }
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Errorf("missing bearer token")
+		}
 		page := r.URL.Query().Get("page")
 		w.Header().Set("X-Pagination-Page-Count", "2")
 		w.Header().Set("Content-Type", "application/json")
@@ -30,32 +34,58 @@ func TestHistoryImporterPaginationHierarchyAndBaseline(t *testing.T) {
 
 	imp := NewHistoryImporter(db, server.URL, server.Client(), "token")
 	got, err := imp.ImportInitial(context.Background())
-	if err != nil { t.Fatal(err) }
-	if got.Imported != 2 || got.Pages != 2 { t.Fatalf("unexpected result: %+v", got) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Imported != 2 || got.Pages != 2 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
 	assertCount(t, db, "watch_events", 2)
+	assertCountWhere(t, db, "watch_events", "is_baseline=1", 2)
 	assertCount(t, db, "prompt_tasks", 0)
 	assertCountWhere(t, db, "media_items", "media_type='movie'", 1)
 	assertCountWhere(t, db, "media_items", "media_type='show'", 1)
 	assertCountWhere(t, db, "media_items", "media_type='season'", 1)
 	assertCountWhere(t, db, "media_items", "media_type='episode'", 1)
 	var state string
-	if err := db.QueryRow(`SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='initial_history_complete'`).Scan(&state); err != nil || state != "1" { t.Fatalf("baseline state=%q err=%v", state, err) }
+	if err := db.QueryRow(`SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='initial_history_complete'`).Scan(&state); err != nil || state != "1" {
+		t.Fatalf("baseline state=%q err=%v", state, err)
+	}
 
 	again, err := imp.ImportInitial(context.Background())
-	if err != nil { t.Fatal(err) }
-	if again.Imported != 0 || again.Pages != 0 { t.Fatalf("completed baseline should not refetch: %+v", again) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Imported != 0 || again.Pages != 0 {
+		t.Fatalf("completed baseline should not refetch: %+v", again)
+	}
 }
 
 func TestHistoryImporterOverlapRewatchesAndSameTimestamp(t *testing.T) {
 	db := testHistoryDB(t)
 	body := `[{"id":201,"watched_at":"2026-08-03T00:00:00Z","type":"movie","movie":{"title":"Repeat","year":2020,"ids":{"trakt":77}}},{"id":202,"watched_at":"2026-08-03T00:00:00Z","type":"movie","movie":{"title":"Repeat","year":2020,"ids":{"trakt":77}}}]`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Header().Set("X-Pagination-Page-Count","1"); fmt.Fprint(w, body) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Pagination-Page-Count", "1")
+		fmt.Fprint(w, body)
+	}))
 	defer server.Close()
 	imp := NewHistoryImporter(db, server.URL, server.Client(), "")
-	first, err := imp.ImportIncremental(context.Background()); if err != nil { t.Fatal(err) }
-	second, err := imp.ImportIncremental(context.Background()); if err != nil { t.Fatal(err) }
-	if first.Imported != 2 || second.Skipped != 2 { t.Fatalf("first=%+v second=%+v", first, second) }
+	first, err := imp.ImportIncremental(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := imp.ImportIncremental(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Imported != 2 || second.Skipped != 2 {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+	if len(first.NewWatchEventIDs) != 2 || len(second.NewWatchEventIDs) != 0 {
+		t.Fatalf("incremental event IDs: first=%v second=%v", first.NewWatchEventIDs, second.NewWatchEventIDs)
+	}
 	assertCount(t, db, "watch_events", 2)
+	assertCountWhere(t, db, "watch_events", "is_baseline=0", 2)
 	assertCountWhere(t, db, "media_items", "media_type='movie'", 1)
 }
 
@@ -64,18 +94,31 @@ func TestHistoryImporterInterruptedInitialSyncResumesIdempotently(t *testing.T) 
 	failPage2 := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Pagination-Page-Count", "2")
-		if r.URL.Query().Get("page") == "1" { fmt.Fprint(w, `[{"id":301,"watched_at":"2026-08-04T00:00:00Z","type":"movie","movie":{"title":"One","year":2020,"ids":{"trakt":301}}}]`); return }
-		if failPage2 { http.Error(w,"boom",500); return }
+		if r.URL.Query().Get("page") == "1" {
+			fmt.Fprint(w, `[{"id":301,"watched_at":"2026-08-04T00:00:00Z","type":"movie","movie":{"title":"One","year":2020,"ids":{"trakt":301}}}]`)
+			return
+		}
+		if failPage2 {
+			http.Error(w, "boom", 500)
+			return
+		}
 		fmt.Fprint(w, `[{"id":302,"watched_at":"2026-08-05T00:00:00Z","type":"movie","movie":{"title":"Two","year":2021,"ids":{"trakt":302}}}]`)
 	}))
 	defer server.Close()
 	imp := NewHistoryImporter(db, server.URL, server.Client(), "")
-	if _, err := imp.ImportInitial(context.Background()); err == nil { t.Fatal("expected interruption") }
+	if _, err := imp.ImportInitial(context.Background()); err == nil {
+		t.Fatal("expected interruption")
+	}
 	assertCount(t, db, "watch_events", 1)
 	assertCountWhere(t, db, "integration_state", "integration='trakt' AND state_key='initial_history_complete'", 0)
 	failPage2 = false
-	got, err := imp.ImportInitial(context.Background()); if err != nil { t.Fatal(err) }
-	if got.Imported != 1 || got.Skipped != 1 { t.Fatalf("resume result=%+v", got) }
+	got, err := imp.ImportInitial(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Imported != 1 || got.Skipped != 1 {
+		t.Fatalf("resume result=%+v", got)
+	}
 	assertCount(t, db, "watch_events", 2)
 	assertCount(t, db, "prompt_tasks", 0)
 }
@@ -91,32 +134,67 @@ func TestHistoryImporterRejectsMalformedAndUnsupportedItems(t *testing.T) {
 			db := testHistoryDB(t)
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
 			defer s.Close()
-			if _, err := NewHistoryImporter(db,s.URL,s.Client(),"").ImportIncremental(context.Background()); err == nil { t.Fatal("expected error") }
-			assertCount(t,db,"watch_events",0)
+			if _, err := NewHistoryImporter(db, s.URL, s.Client(), "").ImportIncremental(context.Background()); err == nil {
+				t.Fatal("expected error")
+			}
+			assertCount(t, db, "watch_events", 0)
 		})
 	}
 }
 
 func TestHistoryImporterRemoteAndDecodeErrors(t *testing.T) {
-	for _, tc := range []struct{name string; handler http.HandlerFunc}{
-		{"http", func(w http.ResponseWriter,r *http.Request){http.Error(w,"no",503)}},
-		{"json", func(w http.ResponseWriter,r *http.Request){fmt.Fprint(w,"{")}},
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"http", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", 503) }},
+		{"json", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "{") }},
 	} {
-		t.Run(tc.name,func(t *testing.T){db:=testHistoryDB(t); s:=httptest.NewServer(tc.handler); defer s.Close(); if _,err:=NewHistoryImporter(db,s.URL,s.Client(),"").ImportIncremental(context.Background()); err==nil {t.Fatal("expected error")}})
+		t.Run(tc.name, func(t *testing.T) {
+			db := testHistoryDB(t)
+			s := httptest.NewServer(tc.handler)
+			defer s.Close()
+			if _, err := NewHistoryImporter(db, s.URL, s.Client(), "").ImportIncremental(context.Background()); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestHistoryImporterReturnsRetryAfterForRateLimit(t *testing.T) {
+	db := testHistoryDB(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "17")
+		http.Error(w, "slow down", http.StatusTooManyRequests)
+	}))
+	defer s.Close()
+	_, err := NewHistoryImporter(db, s.URL, s.Client(), "").ImportIncremental(context.Background())
+	var retryable *RetryableError
+	if !errors.As(err, &retryable) || retryable.StatusCode != http.StatusTooManyRequests || retryable.RetryAfter != 17*time.Second {
+		t.Fatalf("unexpected rate-limit error: %#v", err)
 	}
 }
 
 func testHistoryDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(),"history.db")})
-	if err != nil { t.Fatal(err) }
-	t.Cleanup(func(){_ = db.Close()})
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "history.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
-func assertCount(t *testing.T, db *sql.DB, table string, want int) { assertCountWhere(t,db,table,"1=1",want) }
+func assertCount(t *testing.T, db *sql.DB, table string, want int) {
+	assertCountWhere(t, db, table, "1=1", want)
+}
 func assertCountWhere(t *testing.T, db *sql.DB, table, where string, want int) {
-	t.Helper(); var got int
-	if err:=db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+where).Scan(&got); err!=nil {t.Fatal(err)}
-	if got!=want {t.Fatalf("%s count=%d want=%d",table,got,want)}
+	t.Helper()
+	var got int
+	if err := db.QueryRow("SELECT COUNT(*) FROM " + table + " WHERE " + where).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("%s count=%d want=%d", table, got, want)
+	}
 }
