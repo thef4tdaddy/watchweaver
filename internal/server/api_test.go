@@ -25,6 +25,7 @@ type apiFixture struct {
 	t       *testing.T
 	db      *sql.DB
 	handler http.Handler
+	api     *API
 	movieID int64
 	taskID  int64
 }
@@ -44,8 +45,9 @@ func newAPIFixture(t *testing.T, traktService *trakt.Service) *apiFixture {
 		t.Fatal(err)
 	}
 	task := mustExecID(t, db, `INSERT INTO prompt_tasks(media_id,task_type,state) VALUES(?,'rating_review','pending')`, movie)
-	h := newHandlerWithAPI(NewReadiness(), fstest.MapFS{"index.html": {Data: []byte("SPA")}}, NewAPI(db, traktService))
-	return &apiFixture{t: t, db: db, handler: h, movieID: movie, taskID: task}
+	api := NewAPI(db, traktService)
+	h := newHandlerWithAPI(NewReadiness(), fstest.MapFS{"index.html": {Data: []byte("SPA")}}, api)
+	return &apiFixture{t: t, db: db, handler: h, api: api, movieID: movie, taskID: task}
 }
 
 func mustExecID(t *testing.T, db *sql.DB, query string, args ...any) int64 {
@@ -244,8 +246,9 @@ func TestSettingsDefaultsUpdateValidationAndSecretRedaction(t *testing.T) {
 		t.Fatalf("invalid timezone: %d", rr.Code)
 	}
 	_, _ = f.db.Exec(`INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','access_token','super-secret'),('trakt','refresh_token','also-secret')`)
+	f.api.SetDiscordConfigured(true)
 	rr = f.request(http.MethodGet, "/api/integrations", "")
-	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "secret") || strings.Contains(rr.Body.String(), "token") {
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "secret") || strings.Contains(rr.Body.String(), "token") || !strings.Contains(rr.Body.String(), `"discord":{"enabled":true,"status":"configured"}`) {
 		t.Fatalf("secret leaked or status failed: %d %s", rr.Code, rr.Body.String())
 	}
 }

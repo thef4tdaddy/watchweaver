@@ -63,3 +63,11 @@ and each file remains below Letterboxd's 1 MB limit.
 
 Due state uses the configured change-count OR elapsed-days thresholds and remains
 false when Serializd is disabled or when no transferable changes are pending.
+
+## Discord announcements
+
+Discord is an optional, outbound-only integration configured with the
+`DISCORD_WEBHOOK_URL` environment variable. Integration status exposes only a
+configured/disabled boolean state; the webhook URL is never returned. Delivery
+state and conservative retry metadata are persisted for prompt summaries and
+Serializd due-transition announcements. Discord provides no interactive controls.

@@ -23,6 +23,7 @@ type Config struct {
 	TraktBaseURL      string
 	TraktPollInterval time.Duration
 	TraktPollOverlap  time.Duration
+	DiscordWebhookURL string
 }
 
 func Load() Config {
@@ -47,6 +48,7 @@ func Load() Config {
 		TraktBaseURL:      strings.TrimSpace(os.Getenv("TRAKT_BASE_URL")),
 		TraktPollInterval: durationEnv("TRAKT_POLL_INTERVAL", defaultTraktPollInterval),
 		TraktPollOverlap:  durationEnv("TRAKT_POLL_OVERLAP", defaultTraktPollOverlap),
+		DiscordWebhookURL: strings.TrimSpace(os.Getenv("DISCORD_WEBHOOK_URL")),
 	}
 }
 
