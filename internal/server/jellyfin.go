@@ -13,16 +13,16 @@ import (
 
 const jellyfinTokenKey = "ingest_token"
 
+func (a *API) jellyfinService() *jellyfin.Service { return jellyfin.NewService(a.db) }
+
 func (a *API) jellyfinConfig(w http.ResponseWriter, r *http.Request) {
-	if a.credentials == nil || a.jellyfin == nil {
-		writeError(w, http.StatusServiceUnavailable, "credential storage is unavailable")
-		return
-	}
+	if a.credentials == nil { writeError(w, http.StatusServiceUnavailable, "credential storage is unavailable"); return }
+	svc := a.jellyfinService()
 	switch r.Method {
 	case http.MethodGet:
 		configured, err := a.credentials.Configured(r.Context(), "jellyfin", jellyfinTokenKey)
 		if err != nil { internalError(w); return }
-		status, err := a.jellyfin.Status(r.Context(), configured)
+		status, err := svc.Status(r.Context(), configured)
 		if err != nil { internalError(w); return }
 		writeJSON(w, http.StatusOK, status)
 	case http.MethodPost:
@@ -40,18 +40,19 @@ func (a *API) jellyfinConfig(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { methodNotAllowed(w); return }
-	if a.credentials == nil || a.jellyfin == nil { writeError(w, http.StatusServiceUnavailable, "Jellyfin ingestion is unavailable"); return }
+	if a.credentials == nil { writeError(w, http.StatusServiceUnavailable, "Jellyfin ingestion is unavailable"); return }
+	svc := a.jellyfinService()
 	expected, err := a.credentials.Get(r.Context(), "jellyfin", jellyfinTokenKey)
 	if err != nil { internalError(w); return }
 	provided := bearerToken(r.Header.Get("Authorization"))
 	if expected == "" || provided == "" || !secureEqual(expected, provided) {
-		a.jellyfin.RecordAuthFailure(r.Context())
+		svc.RecordAuthFailure(r.Context())
 		writeError(w, http.StatusUnauthorized, "invalid Jellyfin ingestion token")
 		return
 	}
 	var event jellyfin.Event
-	if !decodeJSON(w, r, &event) { a.jellyfin.RecordRejection(r.Context(), "invalid_json"); return }
-	result, err := a.jellyfin.Accept(r.Context(), event)
+	if !decodeJSON(w, r, &event) { svc.RecordRejection(r.Context(), "invalid_json"); return }
+	result, err := svc.Accept(r.Context(), event)
 	if errors.Is(err, jellyfin.ErrInvalidEvent) { badRequest(w, err.Error()); return }
 	if errors.Is(err, jellyfin.ErrEventConflict) { conflict(w, err.Error()); return }
 	if err != nil { internalError(w, err); return }
