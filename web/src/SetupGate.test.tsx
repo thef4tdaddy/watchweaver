@@ -22,6 +22,10 @@ describe('first-run setup',()=>{
       return json({error:'not found'},404)
     })
     vi.stubGlobal('fetch',fetchMock);render(<SetupGate/>);expect(await screen.findByText('Set up WatchWeaver')).toBeInTheDocument()
+    expect(screen.getByText(/with Trakt VIP or an existing valid API application/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('How to get your Trakt Client ID and Secret'))
+    expect(screen.getByRole('link',{name:/Trakt API applications/i})).toHaveAttribute('href','https://trakt.tv/oauth/applications')
+    expect(screen.getByText('urn:ietf:wg:oauth:2.0:oob')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('Paste Trakt client ID'),{target:{value:'client-id'}})
     fireEvent.change(screen.getByPlaceholderText('Paste Trakt client secret'),{target:{value:'client-secret'}})
     fireEvent.click(screen.getByRole('button',{name:'Save and connect'}));expect(await screen.findByText('ABCD')).toBeInTheDocument()
@@ -33,5 +37,19 @@ describe('first-run setup',()=>{
   it('shows environment-managed credentials as locked',async()=>{
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>String(input)==='/api/setup'?json({complete:false,encrypted_storage:true,trakt:{configured:true,authorization_status:'not_authorized',client_id_overridden:true,client_secret_overridden:true},discord:{configured:false,enabled:false,webhook_overridden:false}}):json({error:'not found'},404)))
     render(<SetupGate/>);expect(await screen.findByText(/Environment-managed fields are locked/i)).toBeInTheDocument();screen.getAllByPlaceholderText('Locked by environment').forEach(field=>expect(field).toBeDisabled())
+  })
+
+  it('turns rejected Trakt credentials into actionable help',async()=>{
+    vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>{
+      const path=String(input)
+      if(path==='/api/setup')return json({complete:false,encrypted_storage:true,trakt:{configured:false,authorization_status:'not_configured',client_id_overridden:false,client_secret_overridden:false},discord:{configured:false,enabled:false,webhook_overridden:false}})
+      if(path==='/api/integrations/trakt/config')return json({error:'Trakt returned HTTP 401: invalid client'},401)
+      return json({error:'not found'},404)
+    }))
+    render(<SetupGate/>);await screen.findByText('Set up WatchWeaver')
+    fireEvent.change(screen.getByPlaceholderText('Paste Trakt client ID'),{target:{value:'bad-id'}})
+    fireEvent.change(screen.getByPlaceholderText('Paste Trakt client secret'),{target:{value:'bad-secret'}})
+    fireEvent.click(screen.getByRole('button',{name:'Save and connect'}))
+    expect(await screen.findByText(/Check the Client ID and Secret/i)).toBeInTheDocument()
   })
 })

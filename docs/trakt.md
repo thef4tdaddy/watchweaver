@@ -6,7 +6,7 @@ This document defines Trakt authentication, history ingestion, rating synchroniz
 
 ## Role of Trakt
 
-Trakt is the required upstream ingestion integration for v0.1. Jellyfin and other scrobblers remain upstream of Trakt; WatchWeaver does not require Jellyfin credentials.
+Trakt is an optional integration for users who have Trakt VIP or an existing valid API application, and is the only automated upstream ingestion integration for v0.1. Jellyfin and other scrobblers remain upstream of Trakt; WatchWeaver does not require Jellyfin credentials.
 
 Trakt is not WatchWeaver's database. Once activity is imported, WatchWeaver owns its local watch events and workflow state.
 
@@ -17,6 +17,22 @@ WatchWeaver uses Trakt's OAuth device authorization flow so a headless NAS/serve
 The web UI presents the authorization instructions/code and reports connection status.
 
 Client credentials and tokens must remain outside source control. Persisted credentials are treated as secrets and must not be exposed through normal API/UI responses or logs.
+
+### Creating a Trakt API application
+
+Creating a new personal Trakt API application currently requires Trakt VIP. An existing valid application can still be used. This requirement is Trakt's policy; WatchWeaver does not charge for or provide a subscription.
+
+Create an application at [Trakt API applications](https://trakt.tv/oauth/applications) with these values:
+
+- Name: `WatchWeaver`
+- Website: `https://github.com/thef4tdaddy/watchweaver`
+- Redirect URI: `urn:ietf:wg:oauth:2.0:oob`
+- Description: `Private self-hosted media tracker`
+- JavaScript origins: leave blank
+
+Save the application, copy its Client ID and Client Secret into WatchWeaver's first-run wizard, and choose **Save and connect**. Open the Trakt activation page, enter the device code shown by WatchWeaver, approve access, and return to WatchWeaver. The Client Secret is write-only after saving.
+
+Trakt remains the supported automatic history source for the current release. A direct Jellyfin integration is planned separately so a future release can offer an alternative path.
 
 ## Initial synchronization
 

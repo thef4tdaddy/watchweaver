@@ -9,6 +9,7 @@ import {
   type OperationalStatus,
   type Page,
   type Rating,
+  type Review,
   type SerializdStatus,
   type Settings,
   type Task,
@@ -482,6 +483,7 @@ function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) =
 function History({ onError }: { onError: (v: string) => void }) {
   const [pageNo, setPageNo] = useState(1);
   const [data, setData] = useState<Page<HistoryItem>>();
+  const [editing, setEditing] = useState<number>();
   useEffect(() => {
     request<Page<HistoryItem>>(`/api/history?page=${pageNo}&per_page=20`)
       .then(setData)
@@ -524,6 +526,10 @@ function History({ onError }: { onError: (v: string) => void }) {
                     : item.media.year}
                 </p>
                 <small>{formatDate(item.watched_at)}</small>
+                <button className="secondary history-edit-button" onClick={() => setEditing(editing === item.id ? undefined : item.id)}>
+                  {editing === item.id ? "Close editor" : "Rate or review"}
+                </button>
+                {editing === item.id && <HistoryEditor item={item} onError={onError} />}
               </div>
             </article>
           ))}
@@ -532,6 +538,65 @@ function History({ onError }: { onError: (v: string) => void }) {
       <Pager page={data.page} pages={data.total_pages} setPage={setPageNo} />
     </section>
   );
+}
+
+function HistoryEditor({ item, onError }: { item: HistoryItem; onError: (v: string) => void }) {
+  const targets = item.media.type === "episode" && item.media.season_id
+    ? [{ id: item.media.id, label: "This episode", type: "episode" }, { id: item.media.season_id, label: `Season ${item.media.season_number}`, type: "season" }]
+    : [{ id: item.media.id, label: "This movie", type: "movie" }];
+  const [target, setTarget] = useState(targets[0]);
+  const [rating, setRating] = useState<number>();
+  const [review, setReview] = useState("");
+  const [original, setOriginal] = useState<{ rating?: number; review: string }>({ review: "" });
+  const [busy, setBusy] = useState(true);
+  const [saved, setSaved] = useState("");
+  // oxlint-disable react/set-state-in-effect -- changing targets starts an external API synchronization.
+  useEffect(() => {
+    setBusy(true);
+    setSaved("");
+    Promise.all([
+      request<Rating>(`/api/media/${target.id}/rating`).catch((e) => e instanceof APIError && e.status === 404 ? undefined : Promise.reject(e)),
+      request<Review>(`/api/media/${target.id}/review`).catch((e) => e instanceof APIError && e.status === 404 ? undefined : Promise.reject(e)),
+    ]).then(([currentRating, currentReview]) => {
+      const value = { rating: currentRating?.rating, review: currentReview?.body || "" };
+      setRating(value.rating);
+      setReview(value.review);
+      setOriginal(value);
+    }).catch((e) => onError(e.message)).finally(() => setBusy(false));
+  }, [target.id, onError]);
+  // oxlint-enable react/set-state-in-effect
+  const save = async () => {
+    setBusy(true);
+    setSaved("");
+    try {
+      if (rating !== original.rating) await request(`/api/media/${target.id}/rating`, rating === undefined ? { method: "DELETE" } : { method: "PUT", body: JSON.stringify({ rating }) });
+      const trimmed = review.trim();
+      if (trimmed !== original.review) await request(`/api/media/${target.id}/review`, trimmed ? { method: "PUT", body: JSON.stringify({ body: trimmed }) } : { method: "DELETE" });
+      const value = { rating, review: trimmed };
+      setReview(trimmed);
+      setOriginal(value);
+      setSaved("Saved");
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const destination = target.type === "movie"
+    ? "The rating syncs to Trakt. The review stays local and is included in your next Letterboxd CSV."
+    : target.type === "episode"
+      ? "The rating syncs to Trakt. The review stays local because Serializd cannot import it from Trakt."
+      : "The season rating syncs to Trakt. The season review stays local and must be entered manually elsewhere.";
+  return <div className="history-editor">
+    {targets.length > 1 && <div className="target-tabs">{targets.map((value) => <button key={value.id} className={target.id === value.id ? "active" : ""} onClick={() => setTarget(value)}>{value.label}</button>)}</div>}
+    {busy ? <Loading /> : <>
+      <div className="rating-row" aria-label={`Rating for ${target.label}`}>{stars.map((value) => <button key={value} title={`${value / 2} stars`} className={(rating || 0) >= value ? "filled" : ""} onClick={() => setRating(value)}>{value % 2 === 0 ? "★" : "◐"}</button>)}<b>{rating ? `${rating / 2} / 5` : "Not rated"}</b></div>
+      {rating !== undefined && <button className="text-button" onClick={() => setRating(undefined)}>Clear rating</button>}
+      <textarea value={review} onChange={(e) => setReview(e.target.value)} placeholder="Add an optional review…" aria-label={`Review for ${target.label}`} />
+      <p className="destination-note">{destination}</p>
+      <div className="actions"><button className="primary" disabled={rating === original.rating && review.trim() === original.review} onClick={() => void save()}>Save changes</button>{saved && <span className="saved-note">✓ {saved}</span>}</div>
+    </>}
+  </div>;
 }
 
 function Movies({ onError }: { onError: (v: string) => void }) {
