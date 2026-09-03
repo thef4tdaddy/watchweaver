@@ -61,6 +61,8 @@ func newHandlerWithAPI(readiness *Readiness, staticAssets fs.FS, api *API) http.
 	mux.HandleFunc("/readyz", readyz(readiness))
 	if api != nil {
 		api.Register(mux)
+		mux.HandleFunc("/api/integrations/jellyfin", api.jellyfinConfig)
+		mux.HandleFunc("/api/integrations/jellyfin/events", api.jellyfinIngest)
 	}
 	if staticAssets != nil {
 		mux.Handle("/", newSPAHandler(staticAssets))
