@@ -92,6 +92,7 @@ function SetupDialog({
   const [clientSecret, setClientSecret] = useState("");
   const [webhook, setWebhook] = useState("");
   const [discordEnabled, setDiscordEnabled] = useState(setup.discord.enabled);
+  const [jellyfinToken, setJellyfinToken] = useState("");
   const [auth, setAuth] = useState<Authorization>({
     status: setup.trakt.authorization_status,
   });
@@ -156,6 +157,15 @@ function SetupDialog({
       await request("/api/integrations/discord/test", { method: "POST" });
       setMessage("Test announcement sent.");
     });
+  const generateJellyfinToken = () => run(async () => {
+    const result = await request<{token:string}>("/api/integrations/jellyfin", {method:"POST"});
+    setJellyfinToken(result.token);
+    setMessage("Jellyfin token generated. Copy it now; WatchWeaver will not show it again.");
+  });
+  const revokeJellyfinToken = () => run(async () => {
+    await request("/api/integrations/jellyfin", {method:"DELETE"});
+    setJellyfinToken(""); setMessage("Jellyfin token revoked.");
+  });
   const missingClientID =
     !clientID && !setup.trakt.configured && !setup.trakt.client_id_overridden;
   const missingClientSecret =
@@ -202,9 +212,19 @@ function SetupDialog({
         </div>
         {message && <div className="setup-message">{message}</div>}
         <section>
-          <h2>1. Trakt</h2>
+          <h2>1. Jellyfin</h2>
+          <p>Use Jellyfin as your only automated history source, or alongside Trakt. Generate a dedicated token, then paste the one-time value into the WatchWeaver Jellyfin plugin.</p>
+          <div className="setup-actions">
+            <button disabled={busy} onClick={() => void generateJellyfinToken()}>{setup.jellyfin?.configured ? "Rotate token" : "Generate token"}</button>
+            {setup.jellyfin?.configured && <button className="secondary" disabled={busy} onClick={() => void revokeJellyfinToken()}>Revoke</button>}
+          </div>
+          {jellyfinToken && <div className="device-code"><strong>{jellyfinToken}</strong><button onClick={() => void copyText(jellyfinToken).then(()=>setMessage("Jellyfin token copied."))}>Copy token</button></div>}
+          {setup.jellyfin?.configured && <div className="setup-success">✓ Jellyfin receiver ready · protocol v{setup.jellyfin.protocol_version}</div>}
+        </section>
+        <section>
+          <h2>2. Trakt <small>optional</small></h2>
           <TraktAccessNote />
-          <p>Trakt is the automated watch-history source in this release.</p>
+          <p>Trakt is optional for people with Trakt VIP or an existing valid API application. Jellyfin can complete setup without it.</p>
           <details className="trakt-guide">
             <summary>How to get your Trakt Client ID and Secret</summary>
             <ol>
@@ -298,7 +318,7 @@ function SetupDialog({
         </section>
         <section>
           <h2>
-            2. Discord <small>optional</small>
+            3. Discord <small>optional</small>
           </h2>
           <label className="setup-check">
             <input
@@ -352,7 +372,7 @@ function SetupDialog({
         <div className="setup-footer">
           <span>No login: restrict access to your trusted LAN or VPN.</span>
           <button
-            disabled={required && auth.status !== "connected"}
+            disabled={required && auth.status !== "connected" && !setup.jellyfin?.configured && !jellyfinToken}
             onClick={onClose}
           >
             {required ? "Finish setup" : "Done"}

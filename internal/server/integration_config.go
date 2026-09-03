@@ -28,15 +28,21 @@ func (a *API) setupStatus(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	jellyfinConfigured, err := a.credentials.Configured(r.Context(), "jellyfin", jellyfinTokenKey)
+	if err != nil {
+		internalError(w)
+		return
+	}
 	authorization := "not_configured"
 	if a.trakt != nil {
 		authorization = string(a.trakt.Status(r.Context()).Status)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"complete":          traktConfigured && authorization == "connected",
+		"complete":          jellyfinConfigured || (traktConfigured && authorization == "connected"),
 		"encrypted_storage": true,
 		"trakt":             map[string]any{"configured": traktConfigured, "authorization_status": authorization, "client_id_overridden": a.credentials.IsOverridden("trakt", "client_id"), "client_secret_overridden": a.credentials.IsOverridden("trakt", "client_secret")},
 		"discord":           map[string]any{"configured": discordConfigured, "enabled": a.discord != nil && a.discord.Configured(), "webhook_overridden": a.credentials.IsOverridden("discord", "webhook_url")},
+		"jellyfin":          map[string]any{"configured": jellyfinConfigured, "protocol_version": 1},
 	})
 }
 

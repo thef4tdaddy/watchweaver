@@ -810,7 +810,16 @@ func (a *API) integrationStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		syncStatus.CanSync = traktStatus.Status == trakt.StatusConnected
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus, "sync": syncStatus}, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[discordConfigured]}})
+	jellyfinConfigured := false
+	if a.credentials != nil {
+		jellyfinConfigured, _ = a.credentials.Configured(r.Context(), "jellyfin", jellyfinTokenKey)
+	}
+	jellyfinStatus, err := a.jellyfinService().Status(r.Context(), jellyfinConfigured)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trakt": map[string]any{"authorization": traktStatus, "poll": pollStatus, "sync": syncStatus}, "jellyfin": jellyfinStatus, "serializd": map[string]any{"enabled": settings.SerializdEnabled, "status": map[bool]string{true: "enabled", false: "disabled"}[settings.SerializdEnabled]}, "letterboxd": map[string]any{"enabled": true, "status": "available"}, "discord": map[string]any{"enabled": discordConfigured, "status": map[bool]string{true: "configured", false: "disabled"}[discordConfigured]}})
 }
 
 func (a *API) traktSyncNow(w http.ResponseWriter, r *http.Request) {
@@ -957,6 +966,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
+			return false
+		}
 		badRequest(w, "invalid JSON body")
 		return false
 	}

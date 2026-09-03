@@ -110,6 +110,23 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		}
 	}
 	result.Components["trakt"] = operationalComponent{State: traktState, Label: "Trakt", Detail: traktDetail, Action: traktAction}
+	jellyfinConfigured := false
+	if a.credentials != nil {
+		jellyfinConfigured, _ = a.credentials.Configured(ctx, "jellyfin", jellyfinTokenKey)
+	}
+	jellyfinStatus, err := a.jellyfinService().Status(ctx, jellyfinConfigured)
+	if err != nil {
+		return result, err
+	}
+	if jellyfinConfigured {
+		detail := "Connected and waiting for events."
+		if jellyfinStatus.LastAcceptedAt != nil {
+			detail = "Events are being accepted durably."
+		}
+		result.Components["jellyfin"] = operationalComponent{State: "working", Label: "Jellyfin", Detail: detail, Action: "configure"}
+	} else {
+		result.Components["jellyfin"] = operationalComponent{State: "disabled", Label: "Jellyfin", Detail: "Jellyfin ingestion is not configured.", Action: "configure"}
+	}
 	discordEnabled := a.discord != nil && a.discord.Configured()
 	if discordEnabled {
 		result.Components["discord"] = operationalComponent{State: "working", Label: "Discord", Detail: "Announcements are enabled and configured.", Action: "test"}
