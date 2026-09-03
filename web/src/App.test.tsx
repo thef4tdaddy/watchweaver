@@ -63,8 +63,14 @@ beforeEach(() => {
           total_pages: 1,
           items: [task],
         });
+      if (path.startsWith("/api/history"))
+        return json({ page: 1, per_page: 20, total: 1, total_pages: 1, items: [{ id: 1, source: "trakt", watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: task.media }] });
       if (path === "/api/media/9/rating")
         return json({ media_id: 9, rating: 8, stars: 4 });
+      if (path === "/api/media/9/review" && !init?.method)
+        return json({ error: "not found" }, 404);
+      if (path === "/api/media/9/review" && init?.method === "PUT")
+        return json({ media_id: 9, body: "Excellent." });
       if (path === "/api/settings") return json(settings);
       if (path === "/api/serializd")
         return json({
@@ -210,6 +216,18 @@ describe("WatchWeaver dashboard", () => {
         }),
       ),
     );
+  });
+  it("rates and reviews a movie directly from History", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /History/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rate or review" }));
+    expect(await screen.findByText(/included in your next Letterboxd CSV/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("4.5 stars"));
+    fireEvent.change(screen.getByLabelText("Review for This movie"), { target: { value: "Excellent." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/media/9/rating", expect.objectContaining({ method: "PUT", body: JSON.stringify({ rating: 9 }) })));
+    expect(fetch).toHaveBeenCalledWith("/api/media/9/review", expect.objectContaining({ method: "PUT", body: JSON.stringify({ body: "Excellent." }) }));
   });
   it("runs Trakt synchronization from settings", async () => {
     render(<App />);

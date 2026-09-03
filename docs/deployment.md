@@ -93,7 +93,7 @@ Examples include:
 - bootstrap integration credentials/secrets where appropriate
 - reverse-proxy/base-URL related settings where needed
 
-Trakt and Discord credentials are normally entered through the first-run web wizard. WatchWeaver generates a 256-bit credential-encryption key at `/data/.watchweaver.key` with owner-only permissions and stores only AES-GCM ciphertext in SQLite. Existing environment variables remain optional administrator overrides; overridden fields are locked in the UI.
+Trakt and Discord credentials are normally entered through the first-run web wizard. Creating a new personal Trakt API application currently requires Trakt VIP; an existing valid application also works. This is a Trakt policy rather than a WatchWeaver subscription. The wizard links to Trakt and lists the required name, website, redirect URI, description, and device-authorization steps. WatchWeaver generates a 256-bit credential-encryption key at `/data/.watchweaver.key` with owner-only permissions and stores only AES-GCM ciphertext in SQLite. Existing environment variables remain optional administrator overrides; overridden fields are locked in the UI.
 
 For the bootstrap HTTP server, v0.1 defines:
 

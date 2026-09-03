@@ -6,6 +6,7 @@ export type Media = {
   show_title?: string;
   season_number?: number;
   episode_number?: number;
+  season_id?: number;
   external_ids: Record<string, string>;
 };
 export type Task = {
@@ -31,6 +32,7 @@ export type Page<T> = {
   items: T[];
 };
 export type Rating = { media_id: number; rating: number; stars: number };
+export type Review = { media_id: number; body: string; updated_at?: string };
 export type Settings = {
   timezone: string;
   trakt_poll_minutes: number;

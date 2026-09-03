@@ -63,7 +63,7 @@ cd watchweaver
 docker compose up -d
 ```
 
-Open `http://localhost:8080` and follow the first-run wizard to enter Trakt credentials, authorize the account, and optionally configure Discord. No `.env` file is required for normal setup. Compose stores the database, generated credential-encryption key, backups, and retained exports in the named `watchweaver-data` volume. Pin `ghcr.io/thef4tdaddy/watchweaver:<version>` in `compose.yaml` for predictable production upgrades.
+Open `http://localhost:8080` and follow the first-run wizard to enter Trakt credentials, authorize the account, and optionally configure Discord. Creating a new personal API application currently requires [Trakt VIP](https://trakt.tv/vip); an existing valid Trakt application also works. This is a Trakt policy, not a WatchWeaver subscription. The wizard includes the exact application values and device-authorization steps. No `.env` file is required for normal setup. Compose stores the database, generated credential-encryption key, backups, and retained exports in the named `watchweaver-data` volume. Pin `ghcr.io/thef4tdaddy/watchweaver:<version>` in `compose.yaml` for predictable production upgrades.
 
 The Settings page can run Trakt synchronization immediately, retry a failed cycle, and show its last result and next scheduled run. Device authorization is checked automatically while the Trakt code is displayed.
 

@@ -119,7 +119,7 @@ func TestHistoryIncludesTVHierarchy(t *testing.T) {
 	}
 	rr := f.request(http.MethodGet, "/api/history?per_page=1", "")
 	media := decodeMap(t, rr)["items"].([]any)[0].(map[string]any)["media"].(map[string]any)
-	if media["type"] != "episode" || media["show_title"] != "Example Show" || media["season_number"] != float64(2) || media["episode_number"] != float64(8) {
+	if media["type"] != "episode" || media["show_title"] != "Example Show" || media["season_number"] != float64(2) || media["episode_number"] != float64(8) || media["season_id"] != float64(season) {
 		t.Fatalf("incomplete TV identity: %#v", media)
 	}
 }

@@ -25,6 +25,30 @@ type Authorization = {
   poll_after_seconds?: number;
 };
 
+function friendlySetupError(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("expired")) return "The Trakt device code expired. Start authorization again to get a new code.";
+  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid client")) return "Trakt rejected these credentials. Check the Client ID and Secret in your Trakt API application, then save them again.";
+  if (lower.includes("revoked")) return "Trakt authorization was revoked. Start authorization again and approve the new device code.";
+  return message;
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  const copied = document.execCommand("copy");
+  field.remove();
+  if (!copied) throw new Error("Copy is unavailable in this browser. Select and copy the redirect URI manually.");
+}
+
 export default function SetupGate() {
   const [setup, setSetup] = useState<Setup>();
   const [open, setOpen] = useState(false);
@@ -114,7 +138,7 @@ function SetupDialog({
       await fn();
       onChanged();
     } catch (e) {
-      setMessage((e as Error).message);
+      setMessage(friendlySetupError((e as Error).message));
     } finally {
       setBusy(false);
     }
@@ -218,7 +242,20 @@ function SetupDialog({
         {message && <div className="setup-message">{message}</div>}
         <section>
           <h2>1. Trakt</h2>
-          <p>Required for watch history and rating synchronization.</p>
+          <p>Trakt is an optional integration for people with Trakt VIP or an existing valid API application, and is the only automated watch-history source in this release. WatchWeaver itself does not require a subscription.</p>
+          <details className="trakt-guide">
+            <summary>How to get your Trakt Client ID and Secret</summary>
+            <ol>
+              <li>Open <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noreferrer">Trakt API applications ↗</a> and create an application.</li>
+              <li>Use name <code>WatchWeaver</code>.</li>
+              <li>Use website <code>https://github.com/thef4tdaddy/watchweaver</code>.</li>
+              <li>Use redirect URI <code>urn:ietf:wg:oauth:2.0:oob</code> <button className="copy-button" onClick={() => void copyText("urn:ietf:wg:oauth:2.0:oob").then(() => setMessage("Redirect URI copied.")).catch((e) => setMessage((e as Error).message))}>Copy</button></li>
+              <li>Use description <code>Private self-hosted media tracker</code> and leave JavaScript origins blank.</li>
+              <li>Save the application, then copy its Client ID and Client Secret below.</li>
+              <li>Choose Save and connect, open Trakt activation, enter the displayed code, and return here.</li>
+            </ol>
+            <p>Your Client Secret is sensitive. WatchWeaver encrypts it in persistent storage and never returns it to the browser.</p>
+          </details>
           <div className="setup-fields">
             <label>
               Client ID
