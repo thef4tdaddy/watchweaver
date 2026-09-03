@@ -61,8 +61,20 @@ func (a *API) jellyfinConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
+	w.Header().Set("Access-Control-Allow-Methods", "HEAD, POST, OPTIONS")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost && r.Method != http.MethodHead {
 		methodNotAllowed(w)
+		return
+	}
+	if r.Method == http.MethodHead {
+		w.Header().Set("X-WatchWeaver-Protocol-Version", "1")
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if a.credentials == nil {

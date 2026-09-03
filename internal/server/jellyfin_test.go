@@ -108,3 +108,14 @@ func TestJellyfinCompletesSetupWithoutTraktAndRedactsToken(t *testing.T) {
 		}
 	}
 }
+
+func TestJellyfinAuthenticatedConnectionProbe(t *testing.T) {
+	f, token := jellyfinFixture(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/api/v1/ingest/jellyfin/events", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	f.handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent || rr.Header().Get("X-WatchWeaver-Protocol-Version") != "1" {
+		t.Fatalf("probe: %d %#v", rr.Code, rr.Header())
+	}
+}
