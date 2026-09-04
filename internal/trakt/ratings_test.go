@@ -122,6 +122,59 @@ func TestLocalRatingFlushesToTraktAndEchoIsSuppressed(t *testing.T) {
 	}
 }
 
+func TestLocalSeasonRatingResolvesAndPersistsTraktSeasonIdentity(t *testing.T) {
+	db, _ := ratingTestDB(t)
+	showResult, err := db.Exec(`INSERT INTO media_items(media_type,title,year) VALUES('show','Show',2026)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	showID, _ := showResult.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,'trakt','700')`, showID); err != nil {
+		t.Fatal(err)
+	}
+	seasonResult, err := db.Exec(`INSERT INTO media_items(media_type,title,parent_id,season_number) VALUES('season','Show Season 3',?,3)`, showID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seasonID, _ := seasonResult.LastInsertId()
+	local := localratings.NewService(db)
+	if err := local.SetLocal(context.Background(), seasonID, 9); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/shows/700/seasons":
+			if r.URL.Query().Get("extended") != "full" {
+				t.Fatalf("extended=%q", r.URL.Query().Get("extended"))
+			}
+			json.NewEncoder(w).Encode([]any{
+				map[string]any{"number": 2, "ids": map[string]any{"trakt": 702}},
+				map[string]any{"number": 3, "ids": map[string]any{"trakt": 703}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/sync/ratings":
+			var payload map[string][]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if got := payload["seasons"][0]["ids"].(map[string]any)["trakt"]; got != "703" {
+				t.Fatalf("season Trakt id=%v", got)
+			}
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	sync := NewRatingSync(db, server.URL, server.Client(), "client", "token")
+	if err := sync.FlushPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var traktID string
+	if err := db.QueryRow(`SELECT external_id FROM external_ids WHERE media_id=? AND provider='trakt'`, seasonID).Scan(&traktID); err != nil || traktID != "703" {
+		t.Fatalf("persisted season Trakt id=%q err=%v", traktID, err)
+	}
+}
+
 func TestNewerRemoteWinsAndStaleRemoteIsIgnored(t *testing.T) {
 	db, movieID := ratingTestDB(t)
 	local := localratings.NewService(db)
