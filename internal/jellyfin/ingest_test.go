@@ -154,6 +154,37 @@ func TestConcurrentDuplicateDeliveryReturnsSuccess(t *testing.T) {
 	}
 }
 
+func TestAcceptedEventRemainsIdempotentAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "restart.db")
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewService(db).Accept(context.Background(), movieEvent())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = persistence.OpenAndMigrate(persistence.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	second, err := NewService(db).Accept(context.Background(), movieEvent())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Duplicate || second.WatchEventID != first.WatchEventID {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+	var watches int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM watch_events WHERE source='jellyfin'`).Scan(&watches); err != nil || watches != 1 {
+		t.Fatalf("watches=%d err=%v", watches, err)
+	}
+}
+
 func TestEpisodePromptHandoffUsesSettledTVRules(t *testing.T) {
 	tests := []struct {
 		name                                    string
