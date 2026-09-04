@@ -40,6 +40,10 @@ Release tags include an immutable version tag and commit-SHA tag. WatchWeaver pu
 
 Beta releases never update `latest`. Production deployments should prefer an immutable version tag for predictable upgrades.
 
+The running version is shown at the bottom of the desktop sidebar and in Settings on smaller screens. Status can check GitHub Releases for the newest release in the installed channel: beta builds compare only with prereleases and stable builds compare only with stable releases. Development builds identify themselves as `dev` and never claim to be outdated.
+
+Update checks are optional, cached for six hours, and can be disabled in Settings for offline installations. WatchWeaver never pulls an image, changes a Portainer stack, or restarts its container. When an update is available, open its release notes, pull the matching image in Portainer, and recreate the stack while keeping the existing `/data` volume mounted.
+
 ## Network behavior
 
 The application serves its web UI and API from one HTTP listener using the same origin.

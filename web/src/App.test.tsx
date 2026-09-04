@@ -19,6 +19,7 @@ const integrations = {
   serializd: { enabled: true, status: "enabled" },
   discord: { enabled: false, status: "disabled" },
 };
+let currentIntegrations = integrations;
 const settings = {
   timezone: "UTC",
   trakt_poll_minutes: 5,
@@ -27,6 +28,7 @@ const settings = {
   serializd_enabled: true,
   serializd_reminder_changes: 20,
   serializd_reminder_days: 14,
+  update_checks_enabled: true,
 };
 const task: Task = {
   id: 4,
@@ -53,11 +55,13 @@ function json(body: unknown, status = 200) {
 
 beforeEach(() => {
   activeTask = task;
+  currentIntegrations = integrations;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/api/integrations") return json(integrations);
+      if (path === "/api/integrations") return json(currentIntegrations);
+      if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
       if (path === "/api/inbox")
         return json({
           page: 1,
@@ -339,5 +343,32 @@ describe("WatchWeaver dashboard", () => {
     expect(
       screen.getByRole("link", { name: "Download diagnostics" }),
     ).toHaveAttribute("href", "/api/diagnostics");
+  });
+  it("shows scheduled polling and refreshes the inbox when it completes", async () => {
+    let inboxCalls = 0;
+    const originalFetch = fetch as ReturnType<typeof vi.fn>;
+    originalFetch.mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/inbox") { inboxCalls++; return json({ page: 1, per_page: 50, total: 0, total_pages: 0, items: [] }); }
+      if (path === "/api/integrations") return json(currentIntegrations);
+      if (path === "/api/update") return json({ state: "development", running_version: "dev", channel: "development", enabled: true });
+      return json({ error: "not found" }, 404);
+    });
+    render(<App />);
+    expect(await screen.findByText(/Syncing with Trakt/i)).toBeInTheDocument();
+    expect(screen.queryByText("No rating prompts waiting")).not.toBeInTheDocument();
+    currentIntegrations = { ...integrations, trakt: { ...integrations.trakt, poll: { phase: "idle", consecutive_failures: 0 } } };
+    await new Promise((resolve) => window.setTimeout(resolve, 3100));
+    await waitFor(() => expect(screen.getByText("No rating prompts waiting")).toBeInTheDocument());
+    expect(inboxCalls).toBeGreaterThan(1);
+  }, 5000);
+  it("shows the running version and update guidance", async () => {
+    render(<App />);
+    expect(await screen.findByText("Version 0.1.0-beta.1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
+    expect(await screen.findByText("Beta update available")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /release notes or changes/ })).toHaveAttribute("href", "https://example/releases/2");
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/update?force=1", expect.anything()));
   });
 });

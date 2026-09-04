@@ -20,6 +20,9 @@ import (
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
 )
 
+var version = "dev"
+var revision = ""
+
 func main() {
 	cfg := config.Load()
 	if len(os.Args) > 1 {
@@ -95,6 +98,7 @@ func main() {
 		discordNotifier.Configure(discordWebhook)
 	}
 	api := server.NewAPI(db, traktService)
+	api.SetBuildInfo(version, revision)
 	api.SetCredentialStore(credentialStore)
 	api.SetDiscordNotifier(discordNotifier)
 	api.SetTraktSyncManager(traktSync)

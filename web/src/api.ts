@@ -41,6 +41,18 @@ export type Settings = {
   serializd_enabled: boolean;
   serializd_reminder_changes: number;
   serializd_reminder_days: number;
+  update_checks_enabled: boolean;
+};
+export type UpdateStatus = {
+  state: "up_to_date" | "beta_update_available" | "stable_update_available" | "unable" | "disabled" | "development";
+  running_version: string;
+  revision?: string;
+  latest_version?: string;
+  release_url?: string;
+  channel: "beta" | "stable" | "development";
+  checked_at?: string;
+  enabled: boolean;
+  cached?: boolean;
 };
 export type TraktSyncResult = {
   started_at: string;

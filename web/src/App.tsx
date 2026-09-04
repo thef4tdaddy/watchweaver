@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import TraktAccessNote from "./TraktAccessNote";
 import NetworkBoundaryNote from "./NetworkBoundaryNote";
@@ -15,6 +15,7 @@ import {
   type SerializdStatus,
   type Settings,
   type Task,
+  type UpdateStatus,
   request,
 } from "./api";
 
@@ -28,11 +29,14 @@ const nav: [View, string, string][] = [
   ["settings", "Settings", "settings"],
 ];
 const stars = Array.from({ length: 10 }, (_, i) => i + 1);
+const buildVersion = import.meta.env.VITE_APP_VERSION || "dev";
 
 function App() {
   const [view, setView] = useState<View>("inbox");
   const [integrations, setIntegrations] = useState<Integrations>();
   const [error, setError] = useState("");
+  const [dataRevision, setDataRevision] = useState(0);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>();
   const refreshIntegrations = useCallback(
     () =>
       request<Integrations>("/api/integrations")
@@ -40,13 +44,20 @@ function App() {
         .catch((e) => setError(e.message)),
     [],
   );
+  const refreshUpdate = useCallback(() => request<UpdateStatus>("/api/update").then(setUpdateStatus).catch(() => undefined), []);
   useEffect(() => {
     void refreshIntegrations();
-  }, [refreshIntegrations]);
+    void refreshUpdate();
+  }, [refreshIntegrations, refreshUpdate]);
   useEffect(() => {
     const timer = window.setInterval(() => void refreshIntegrations(), 3000);
     return () => window.clearInterval(timer);
   }, [refreshIntegrations]);
+  const refreshCurrentView = useCallback(() => {
+    void refreshIntegrations();
+    void refreshUpdate();
+    setDataRevision((value) => value + 1);
+  }, [refreshIntegrations, refreshUpdate]);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -77,6 +88,7 @@ function App() {
             ok={integrations?.trakt.authorization.status === "connected"}
             label={`Trakt · ${humanStatus(integrations?.trakt.authorization.status)}`}
           />
+          <small className="version-label">Version {updateStatus?.running_version || buildVersion}</small>
           <StatusDot
             ok={integrations?.discord.enabled === true}
             label={`Discord · ${integrations?.discord.enabled ? "On" : "Off"}`}
@@ -91,8 +103,9 @@ function App() {
           </div>
           <button
             className="icon-button"
-            onClick={() => location.reload()}
-            aria-label="Refresh"
+            onClick={refreshCurrentView}
+            aria-label={`Refresh ${nav.find((n) => n[0] === view)?.[1]} data`}
+            title="Refresh current page data"
           >
             ↻
           </button>
@@ -105,16 +118,22 @@ function App() {
         )}
         {view === "inbox" && (
           <Inbox
+            key={`inbox-${dataRevision}`}
             onError={setError}
             syncRunning={integrations?.trakt.sync.running === true}
             syncPhase={integrations?.trakt.poll.phase}
+            syncError={integrations?.trakt.sync.last_error || integrations?.trakt.poll.last_error}
+            integrationLoaded={integrations !== undefined}
           />
         )}{" "}
-        {view === "history" && <History onError={setError} />}{" "}
-        {view === "movies" && <Movies onError={setError} />}{" "}
-        {view === "tv" && <Television onError={setError} />}{" "}
+        {view === "history" && <History key={`history-${dataRevision}`} onError={setError} />}{" "}
+        {view === "movies" && <Movies key={`movies-${dataRevision}`} onError={setError} />}{" "}
+        {view === "tv" && <Television key={`tv-${dataRevision}`} onError={setError} />}{" "}
         {view === "status" && (
           <StatusView
+            key={`status-${dataRevision}`}
+            updateStatus={updateStatus}
+            setUpdateStatus={setUpdateStatus}
             onNavigate={setView}
             onError={setError}
             refreshIntegrations={refreshIntegrations}
@@ -122,6 +141,9 @@ function App() {
         )}{" "}
         {view === "settings" && (
           <SettingsView
+            key={`settings-${dataRevision}`}
+            updateStatus={updateStatus}
+            refreshUpdate={refreshUpdate}
             integrations={integrations}
             refreshIntegrations={refreshIntegrations}
             onError={setError}
@@ -133,10 +155,14 @@ function App() {
 }
 
 function StatusView({
+  updateStatus,
+  setUpdateStatus,
   onNavigate,
   onError,
   refreshIntegrations,
 }: {
+  updateStatus?: UpdateStatus;
+  setUpdateStatus: (value: UpdateStatus) => void;
   onNavigate: (view: View) => void;
   onError: (value: string) => void;
   refreshIntegrations: () => void;
@@ -204,6 +230,7 @@ function StatusView({
         </button>
       </div>
       <NetworkBoundaryNote />
+      <UpdateCard status={updateStatus} onUpdate={setUpdateStatus} onError={onError} />
       <div className="settings-grid">
         {entries.map(([name, component]) => (
           <article className="settings-card" key={name}>
@@ -295,13 +322,15 @@ function mediaLabel(media: Task["media"]) {
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 
-function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string }) {
+function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean }) {
   const [page, setPage] = useState<Page<Task>>();
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const [drafts, setDrafts] = useState<
     Record<number, { rating?: number; review: string }>
   >({});
   const [busy, setBusy] = useState<number>();
+  const syncActive = syncRunning || syncPhase === "polling";
+  const previousSyncActive = useRef(syncActive);
   const load = useCallback(async () => {
     try {
       const data = await request<Page<Task>>("/api/inbox");
@@ -342,6 +371,10 @@ function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) =
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (previousSyncActive.current && !syncActive) void load();
+    previousSyncActive.current = syncActive;
+  }, [load, syncActive]);
   // oxlint-enable react/set-state-in-effect
   const act = async (id: number, action: string, body?: unknown) => {
     setBusy(id);
@@ -367,12 +400,12 @@ function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) =
             {page.total} item{page.total === 1 ? "" : "s"} waiting
           </h2>
         </div>
-        <button className="secondary" onClick={() => void load()}>
-          Refresh
-        </button>
       </div>
-      {syncRunning && <SyncProgress phase={syncPhase} />}
-      {page.items.length === 0 && !syncRunning ? (
+      {syncActive && <SyncProgress phase={syncPhase || "synchronizing"} />}
+      {!syncActive && syncError && <div className="alert" role="status">Latest Trakt check failed: {syncError}. WatchWeaver will retry automatically.</div>}
+      {page.items.length === 0 && !integrationLoaded ? (
+        <Loading />
+      ) : page.items.length === 0 && !syncActive ? (
         <Empty
           title="No rating prompts waiting"
           body="Eligible movie, season, and episode ratings will appear here after Trakt activity is processed. Optional reviews can always be added from History."
@@ -875,10 +908,14 @@ function Television({ onError }: { onError: (v: string) => void }) {
 }
 
 function SettingsView({
+  updateStatus,
+  refreshUpdate,
   integrations,
   refreshIntegrations,
   onError,
 }: {
+  updateStatus?: UpdateStatus;
+  refreshUpdate: () => void;
   integrations?: Integrations;
   refreshIntegrations: () => void;
   onError: (v: string) => void;
@@ -900,6 +937,7 @@ function SettingsView({
           body: JSON.stringify(settings),
         }),
       );
+      refreshUpdate();
     } catch (e) {
       onError((e as Error).message);
     }
@@ -1055,6 +1093,7 @@ function SettingsView({
       <div className="settings-card">
         <p className="eyebrow">PREFERENCES</p>
         <h2>Local behavior</h2>
+        <p className="mobile-version">Running version: <strong>{updateStatus?.running_version || buildVersion}</strong></p>
         <label>
           Timezone
           <input
@@ -1080,6 +1119,19 @@ function SettingsView({
             }
           />
         </label>
+        <div className="toggle-row">
+          <div>
+            <strong>Update checks</strong>
+            <small>Periodically check GitHub Releases. WatchWeaver never updates or restarts itself.</small>
+          </div>
+          <button
+            role="switch"
+            aria-label="Update checks"
+            aria-checked={settings.update_checks_enabled}
+            className={`toggle ${settings.update_checks_enabled ? "on" : ""}`}
+            onClick={() => setSettings({ ...settings, update_checks_enabled: !settings.update_checks_enabled })}
+          ><span /></button>
+        </div>
         <div className="toggle-row">
           <div>
             <strong>Movie prompts</strong>
@@ -1202,6 +1254,31 @@ function SettingsView({
       </div>
     </section>
   );
+}
+
+function UpdateCard({ status, onUpdate, onError }: { status?: UpdateStatus; onUpdate: (value: UpdateStatus) => void; onError: (value: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const check = async () => {
+    setBusy(true);
+    try { onUpdate(await request<UpdateStatus>("/api/update?force=1")); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  if (!status) return <article className="settings-card full"><Loading /></article>;
+  const labels: Record<UpdateStatus["state"], string> = {
+    up_to_date: "Up to date", beta_update_available: "Beta update available",
+    stable_update_available: "Stable update available", unable: "Unable to check",
+    disabled: "Update checks disabled", development: "Development build",
+  };
+  const available = status.state.endsWith("_update_available");
+  return <article className="settings-card full update-card">
+    <div className="card-heading"><div><p className="eyebrow">VERSION</p><h2>{labels[status.state]}</h2></div><span className={`state ${available || status.state === "unable" ? "pending" : "confirmed"}`}>{status.channel}</span></div>
+    <p>Running <strong>{status.running_version}</strong>{status.latest_version && <> · Newest {status.latest_version}</>}</p>
+    {status.checked_at && <p>Last checked: {formatDate(status.checked_at)}</p>}
+    {available && status.release_url && <p><a href={status.release_url} target="_blank" rel="noreferrer">View release notes or changes ↗</a></p>}
+    {available && <p>In Portainer, pull the matching WatchWeaver image and recreate the stack. Your data remains in the mounted <code>/data</code> volume.</p>}
+    <button className="secondary" disabled={busy || !status.enabled || status.channel === "development"} onClick={() => void check()}>{busy ? "Checking…" : "Check for updates"}</button>
+  </article>;
 }
 
 function Metric({
