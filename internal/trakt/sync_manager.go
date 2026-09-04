@@ -190,7 +190,9 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 	}
 	log.Printf("Trakt incremental history poll completed")
 	finaleSeasonIDs := pollResult.FinaleSeasonIDs
-	if complete, err := m.state(ctx, "finale_prompt_backfill_complete"); err != nil {
+	// v2 requests Trakt's extended episode payload; v1 could complete without
+	// receiving episode_type and therefore falsely report zero finales.
+	if complete, err := m.state(ctx, "finale_prompt_backfill_complete_v2"); err != nil {
 		return result, err
 	} else if complete != "1" {
 		since := m.options.Now().UTC().Add(-finaleReconciliationWindow)
@@ -202,7 +204,7 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 		for _, seasonID := range backfill.FinaleSeasonIDs {
 			finaleSeasonIDs = appendUnique(finaleSeasonIDs, seasonID)
 		}
-		if err := m.set(ctx, "finale_prompt_backfill_complete", "1"); err != nil {
+		if err := m.set(ctx, "finale_prompt_backfill_complete_v2", "1"); err != nil {
 			return result, err
 		}
 		log.Printf("Trakt finale prompt reconciliation completed: pages=%d items_scanned=%d finales=%d", backfill.Pages, backfill.Scanned, len(backfill.FinaleSeasonIDs))
