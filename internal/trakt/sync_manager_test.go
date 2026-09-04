@@ -97,11 +97,15 @@ func TestSyncManagerCreatesSeasonPromptFromTraktFinaleAndBackfillsOnce(t *testin
 		t.Fatal(err)
 	}
 	historyRequests := 0
+	var reconciliationStart string
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Pagination-Page-Count", "1")
 		if r.URL.Path == "/sync/history" {
 			historyRequests++
+			if start := r.URL.Query().Get("start_at"); start != "" {
+				reconciliationStart = start
+			}
 			fmt.Fprint(w, `[{"id":901,"watched_at":"2026-09-03T03:00:00Z","type":"episode","episode":{"season":3,"number":10,"title":"Finale","episode_type":"season_finale","ids":{"trakt":3010}},"show":{"title":"Example Show","year":2026,"ids":{"trakt":3000}}}]`)
 			return
 		}
@@ -119,6 +123,9 @@ func TestSyncManagerCreatesSeasonPromptFromTraktFinaleAndBackfillsOnce(t *testin
 	}
 	if prompts != 1 {
 		t.Fatalf("season prompts=%d want 1", prompts)
+	}
+	if reconciliationStart != "2026-08-05T12:00:00Z" {
+		t.Fatalf("reconciliation start_at=%q", reconciliationStart)
 	}
 	var finaleType, provider string
 	if err := db.QueryRow(`SELECT finale_type,provider FROM episode_metadata`).Scan(&finaleType, &provider); err != nil || finaleType != "season" || provider != "trakt" {
