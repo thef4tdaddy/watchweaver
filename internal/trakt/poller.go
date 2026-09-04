@@ -86,37 +86,43 @@ func (p *Poller) Run(ctx context.Context) error {
 }
 
 func (p *Poller) Poll(ctx context.Context) error {
+	_, err := p.PollResult(ctx)
+	return err
+}
+
+func (p *Poller) PollResult(ctx context.Context) (HistoryImportResult, error) {
 	checkpoint, err := p.checkpoint(ctx)
 	if err != nil {
-		return err
+		return HistoryImportResult{}, err
 	}
 	since := checkpoint.Add(-p.overlap)
 
 	var lastErr error
 	for attempt := 0; attempt < p.maxRetries; attempt++ {
-		_, lastErr = p.importer.ImportIncrementalSince(ctx, since)
+		var result HistoryImportResult
+		result, lastErr = p.importer.ImportIncrementalSince(ctx, since)
 		if lastErr == nil {
 			now := p.now().UTC()
 			if err := p.set(ctx, "history_poll_checkpoint", now.Format(time.RFC3339Nano)); err != nil {
-				return err
+				return HistoryImportResult{}, err
 			}
 			if err := p.set(ctx, "history_poll_last_success", now.Format(time.RFC3339Nano)); err != nil {
-				return err
+				return HistoryImportResult{}, err
 			}
 			if err := p.set(ctx, "history_poll_last_error", ""); err != nil {
-				return err
+				return HistoryImportResult{}, err
 			}
 			if err := p.set(ctx, "history_poll_failures", "0"); err != nil {
-				return err
+				return HistoryImportResult{}, err
 			}
-			return nil
+			return result, nil
 		}
 
 		if err := p.set(ctx, "history_poll_last_error", lastErr.Error()); err != nil {
-			return err
+			return HistoryImportResult{}, err
 		}
 		if err := p.set(ctx, "history_poll_failures", strconv.Itoa(attempt+1)); err != nil {
-			return err
+			return HistoryImportResult{}, err
 		}
 		if attempt+1 < p.maxRetries {
 			delay := time.Second << attempt
@@ -125,12 +131,12 @@ func (p *Poller) Poll(ctx context.Context) error {
 				delay = retryable.RetryAfter
 			}
 			if err := p.sleep(ctx, delay); err != nil {
-				return err
+				return HistoryImportResult{}, err
 			}
 		}
 	}
 
-	return fmt.Errorf("trakt history poll failed after %d attempts: %w", p.maxRetries, lastErr)
+	return HistoryImportResult{}, fmt.Errorf("trakt history poll failed after %d attempts: %w", p.maxRetries, lastErr)
 }
 
 func (p *Poller) checkpoint(ctx context.Context) (time.Time, error) {

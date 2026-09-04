@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/thef4tdaddy/watchweaver/internal/metadata"
 )
 
 type HistoryImporter struct {
@@ -27,6 +29,7 @@ type HistoryImportResult struct {
 	Skipped          int
 	Pages            int
 	NewWatchEventIDs []int64
+	FinaleSeasonIDs  []int64
 }
 
 type RetryableError struct {
@@ -49,10 +52,11 @@ type historyItem struct {
 		IDs   map[string]any `json:"ids"`
 	} `json:"movie"`
 	Episode *struct {
-		Season int            `json:"season"`
-		Number int            `json:"number"`
-		Title  string         `json:"title"`
-		IDs    map[string]any `json:"ids"`
+		Season      int            `json:"season"`
+		Number      int            `json:"number"`
+		Title       string         `json:"title"`
+		IDs         map[string]any `json:"ids"`
+		EpisodeType string         `json:"episode_type"`
 	} `json:"episode"`
 	Show *struct {
 		Title string         `json:"title"`
@@ -117,6 +121,15 @@ func (h *HistoryImporter) importAll(ctx context.Context, since time.Time, baseli
 				}
 			} else {
 				r.Skipped++
+			}
+			if !baseline && item.Episode != nil && metadata.FinaleFromTrakt(item.Episode.EpisodeType).CompletesSeason() {
+				seasonID, baselineEvent, err := h.seasonForEvent(ctx, eventID)
+				if err != nil {
+					return r, err
+				}
+				if seasonID != 0 && !baselineEvent {
+					r.FinaleSeasonIDs = appendUnique(r.FinaleSeasonIDs, seasonID)
+				}
 			}
 		}
 		if page >= pages {
@@ -198,15 +211,23 @@ func (h *HistoryImporter) persistItem(ctx context.Context, item historyItem, bas
 		return false, 0, err
 	}
 	defer tx.Rollback()
-	var exists int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_events WHERE source='trakt' AND source_event_id=?`, strconv.FormatInt(item.ID, 10)).Scan(&exists); err != nil {
+	var existingEventID, existingMediaID int64
+	if err = tx.QueryRowContext(ctx, `SELECT id,media_id FROM watch_events WHERE source='trakt' AND source_event_id=?`, strconv.FormatInt(item.ID, 10)).Scan(&existingEventID, &existingMediaID); err == nil {
+		if err := h.storeEpisodeMetadata(ctx, tx, existingMediaID, item); err != nil {
+			return false, 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, 0, err
+		}
+		return false, existingEventID, nil
+	} else if err != sql.ErrNoRows {
 		return false, 0, err
-	}
-	if exists > 0 {
-		return false, 0, nil
 	}
 	mediaID, err := h.ensureMedia(ctx, tx, item)
 	if err != nil {
+		return false, 0, err
+	}
+	if err := h.storeEpisodeMetadata(ctx, tx, mediaID, item); err != nil {
 		return false, 0, err
 	}
 	baselineValue := 0
@@ -225,6 +246,37 @@ func (h *HistoryImporter) persistItem(ctx context.Context, item historyItem, bas
 		return false, 0, err
 	}
 	return true, eventID, nil
+}
+
+func (h *HistoryImporter) storeEpisodeMetadata(ctx context.Context, tx *sql.Tx, mediaID int64, item historyItem) error {
+	if item.Episode == nil {
+		return nil
+	}
+	finale := metadata.FinaleFromTrakt(item.Episode.EpisodeType)
+	_, err := tx.ExecContext(ctx, `INSERT INTO episode_metadata(media_id,finale_type,provider) VALUES(?,?,'trakt') ON CONFLICT(media_id) DO UPDATE SET finale_type=excluded.finale_type,provider=excluded.provider,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, mediaID, finale)
+	return err
+}
+
+func (h *HistoryImporter) seasonForEvent(ctx context.Context, eventID int64) (int64, bool, error) {
+	if eventID == 0 {
+		return 0, false, nil
+	}
+	var seasonID int64
+	var baseline bool
+	err := h.db.QueryRowContext(ctx, `SELECT episode.parent_id,w.is_baseline FROM watch_events w JOIN media_items episode ON episode.id=w.media_id WHERE w.id=? AND episode.media_type='episode'`, eventID).Scan(&seasonID, &baseline)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	return seasonID, baseline, err
+}
+
+func appendUnique(values []int64, value int64) []int64 {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 func (h *HistoryImporter) ensureMedia(ctx context.Context, tx *sql.Tx, item historyItem) (int64, error) {
 	switch {

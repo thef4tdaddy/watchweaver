@@ -27,12 +27,13 @@ type SeasonState struct {
 }
 
 type Batch struct {
-	Baseline        bool
-	NewMovieWatches []int64
-	NewEpisodeIDs   []int64
-	Seasons         []SeasonState
-	IgnoredMovieIDs map[int64]bool
-	IgnoredShowIDs  map[int64]bool
+	Baseline           bool
+	NewMovieWatches    []int64
+	NewEpisodeIDs      []int64
+	CompletedSeasonIDs []int64
+	Seasons            []SeasonState
+	IgnoredMovieIDs    map[int64]bool
+	IgnoredShowIDs     map[int64]bool
 }
 
 type Decision struct {
@@ -49,6 +50,11 @@ func Evaluate(batch Batch) []Decision {
 	for _, movieID := range batch.NewMovieWatches {
 		if movieID != 0 && !batch.IgnoredMovieIDs[movieID] {
 			decisions = append(decisions, Decision{Kind: MovieRating, MediaID: movieID})
+		}
+	}
+	for _, seasonID := range batch.CompletedSeasonIDs {
+		if seasonID != 0 {
+			decisions = append(decisions, Decision{Kind: SeasonRating, MediaID: seasonID})
 		}
 	}
 
