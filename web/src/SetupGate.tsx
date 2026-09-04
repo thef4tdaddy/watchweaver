@@ -1,25 +1,10 @@
 import { useEffect, useState } from "react";
 import App from "./App";
-import { request } from "./api";
+import { request, type SetupStatus } from "./api";
 import TraktAccessNote from "./TraktAccessNote";
 import NetworkBoundaryNote from "./NetworkBoundaryNote";
 import "./setup.css";
 
-type Setup = {
-  complete: boolean;
-  encrypted_storage: boolean;
-  trakt: {
-    configured: boolean;
-    authorization_status: string;
-    client_id_overridden: boolean;
-    client_secret_overridden: boolean;
-  };
-  discord: {
-    configured: boolean;
-    enabled: boolean;
-    webhook_overridden: boolean;
-  };
-};
 type Authorization = {
   status: string;
   user_code?: string;
@@ -52,15 +37,13 @@ async function copyText(value: string) {
 }
 
 export default function SetupGate() {
-  const [setup, setSetup] = useState<Setup>();
-  const [open, setOpen] = useState(false);
+  const [setup, setSetup] = useState<SetupStatus>();
   const [error, setError] = useState("");
   const refresh = () =>
-    request<Setup>("/api/setup")
+    request<SetupStatus>("/api/setup")
       .then((value) => {
         setError("");
         setSetup(value);
-        if (!value.complete) setOpen(true);
       })
       .catch((e) => setError(e.message));
   useEffect(() => {
@@ -91,26 +74,7 @@ export default function SetupGate() {
         onChanged={refresh}
       />
     );
-  return (
-    <>
-      <App />
-      <button className="configure-button" onClick={() => setOpen(true)}>
-        Configure integrations
-      </button>
-      {open && (
-        <SetupDialog
-          setup={setup}
-          required={!setup.complete}
-          onClose={() => {
-            setOpen(false);
-            void refresh();
-          }}
-          onChanged={refresh}
-        />
-      )}{" "}
-      {error && <div className="setup-toast">{error}</div>}
-    </>
-  );
+  return <App />;
 }
 
 function SetupDialog({
@@ -119,7 +83,7 @@ function SetupDialog({
   onClose,
   onChanged,
 }: {
-  setup: Setup;
+  setup: SetupStatus;
   required: boolean;
   onClose: () => void;
   onChanged: () => void;
@@ -235,11 +199,6 @@ function SetupDialog({
               browser.
             </p>
           </div>
-          {!required && (
-            <button onClick={onClose} aria-label="Close">
-              ×
-            </button>
-          )}
         </div>
         {message && <div className="setup-message">{message}</div>}
         <section>

@@ -43,6 +43,21 @@ export type Settings = {
   serializd_reminder_days: number;
   update_checks_enabled: boolean;
 };
+export type SetupStatus = {
+  complete: boolean;
+  encrypted_storage: boolean;
+  trakt: {
+    configured: boolean;
+    authorization_status: string;
+    client_id_overridden: boolean;
+    client_secret_overridden: boolean;
+  };
+  discord: {
+    configured: boolean;
+    enabled: boolean;
+    webhook_overridden: boolean;
+  };
+};
 export type UpdateStatus = {
   state: "up_to_date" | "beta_update_available" | "stable_update_available" | "unable" | "disabled" | "development";
   running_version: string;

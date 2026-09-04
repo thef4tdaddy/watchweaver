@@ -9,12 +9,6 @@
 .setup-splash { display: grid; place-items: center; gap: 18px; }
 .setup-splash img { width: min(520px, 82vw); border-radius: 24px; box-shadow: 0 24px 80px #020617; }
 .setup-splash span { color: #7dd3fc; letter-spacing: .08em; }
-.configure-button {
-  position: fixed; right: 22px; bottom: 20px; z-index: 20;
-  border: 1px solid var(--violet); border-radius: 999px;
-  background: linear-gradient(135deg, #7c3aed, #4338ca); color: #fff;
-  padding: 10px 16px; font-weight: 700; box-shadow: 0 8px 25px #5121cc55;
-}
 .setup-backdrop {
   position: fixed; inset: 0; z-index: 100; background: #020617e8;
   display: grid; place-items: center; padding: 20px; overflow: auto;
@@ -33,7 +27,6 @@
 }
 .setup-heading h1 { font: 500 32px Georgia, serif; margin: 10px 0 6px; }
 .setup-heading p, .setup-dialog section > p, .setup-dialog h2 small, .setup-footer span { color: var(--muted); }
-.setup-heading > button { border: 0; background: transparent; color: var(--ink); font-size: 28px; height: 35px; }
 .setup-dialog section { border-top: 1px solid var(--line); padding: 20px 0; }
 .setup-dialog h2 { font: 500 23px Georgia, serif; margin: 0; }
 .setup-dialog h2 small { font: 500 12px sans-serif; }
@@ -44,8 +37,8 @@
   border: 0; border-radius: 8px; padding: 10px 15px;
   background: linear-gradient(135deg, #7c3aed, #4338ca); color: #fff; font-weight: 750;
 }
-.setup-dialog button:hover:not(:disabled), .configure-button:hover { background: linear-gradient(135deg, #a855f7, #2563eb); }
-.setup-dialog button:focus-visible, .configure-button:focus-visible, .setup-dialog a:focus-visible {
+.setup-dialog button:hover:not(:disabled) { background: linear-gradient(135deg, #a855f7, #2563eb); }
+.setup-dialog button:focus-visible, .setup-dialog a:focus-visible {
   outline: 3px solid var(--cyan); outline-offset: 2px;
 }
 .setup-dialog button:disabled { opacity: .5; cursor: not-allowed; }
@@ -78,5 +71,4 @@
   .setup-fields { grid-template-columns: 1fr; }
   .setup-dialog { padding: 20px; }
   .setup-footer { align-items: flex-start; flex-direction: column; }
-  .configure-button { right: 12px; bottom: 12px; }
 }

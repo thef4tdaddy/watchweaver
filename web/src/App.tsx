@@ -14,6 +14,7 @@ import {
   type Review,
   type SerializdStatus,
   type Settings,
+  type SetupStatus,
   type Task,
   type UpdateStatus,
   request,
@@ -329,7 +330,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }
     Record<number, { rating?: number; review: string }>
   >({});
   const [busy, setBusy] = useState<number>();
-  const syncActive = syncRunning || syncPhase === "polling";
+  const syncActive = syncRunning;
   const previousSyncActive = useRef(syncActive);
   const load = useCallback(async () => {
     try {
@@ -923,11 +924,66 @@ function SettingsView({
   const [settings, setSettings] = useState<Settings>();
   const [authBusy, setAuthBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [setup, setSetup] = useState<SetupStatus>();
+  const [clientID, setClientID] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [webhook, setWebhook] = useState("");
+  const [discordEnabled, setDiscordEnabled] = useState(false);
+  const [integrationBusy, setIntegrationBusy] = useState(false);
+  const [integrationMessage, setIntegrationMessage] = useState("");
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
       .catch((e) => onError(e.message));
+    request<SetupStatus>("/api/setup")
+      .then((value) => {
+        setSetup(value);
+        setDiscordEnabled(value.discord.enabled);
+      })
+      .catch((e) => onError(e.message));
   }, [onError]);
+  const runIntegrationAction = async (action: () => Promise<string>) => {
+    setIntegrationBusy(true);
+    setIntegrationMessage("");
+    try {
+      setIntegrationMessage(await action());
+      const value = await request<SetupStatus>("/api/setup");
+      setSetup(value);
+      setDiscordEnabled(value.discord.enabled);
+      refreshIntegrations();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setIntegrationBusy(false);
+    }
+  };
+  const saveTraktCredentials = () =>
+    runIntegrationAction(async () => {
+      await request("/api/integrations/trakt/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          client_id: clientID,
+          client_secret: clientSecret,
+        }),
+      });
+      setClientID("");
+      setClientSecret("");
+      return "Trakt credentials saved.";
+    });
+  const saveDiscord = () =>
+    runIntegrationAction(async () => {
+      await request("/api/integrations/discord/config", {
+        method: "PUT",
+        body: JSON.stringify({ webhook_url: webhook, enabled: discordEnabled }),
+      });
+      setWebhook("");
+      return "Discord settings saved.";
+    });
+  const testDiscord = () =>
+    runIntegrationAction(async () => {
+      await request("/api/integrations/discord/test", { method: "POST" });
+      return "Test announcement sent.";
+    });
   const save = async () => {
     if (!settings) return;
     try {
@@ -986,10 +1042,15 @@ function SettingsView({
       setSyncBusy(false);
     }
   };
-  if (!settings || !integrations) return <Loading />;
+  if (!settings || !integrations || !setup) return <Loading />;
   const trakt = integrations.trakt;
   return (
     <section className="settings-grid">
+      {integrationMessage && (
+        <p className="success-message settings-message" role="status">
+          {integrationMessage}
+        </p>
+      )}
       <div className="settings-card">
         <div className="card-heading">
           <div>
@@ -1086,8 +1147,55 @@ function SettingsView({
           </div>
         )}
         <div className="override-note">
-          Manage write-only Trakt credentials with “Configure integrations.”
-          Environment overrides, when present, lock those fields.
+          Saved credentials are encrypted and write-only. Environment overrides,
+          when present, lock those fields.
+        </div>
+        <div className="credential-fields">
+          <label>
+            Client ID
+            <input
+              disabled={setup.trakt.client_id_overridden}
+              value={clientID}
+              onChange={(e) => setClientID(e.target.value)}
+              autoComplete="off"
+              placeholder={
+                setup.trakt.client_id_overridden
+                  ? "Locked by environment"
+                  : setup.trakt.configured
+                    ? "Configured — enter to replace"
+                    : "Paste Trakt client ID"
+              }
+            />
+          </label>
+          <label>
+            Client secret
+            <input
+              disabled={setup.trakt.client_secret_overridden}
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              autoComplete="new-password"
+              placeholder={
+                setup.trakt.client_secret_overridden
+                  ? "Locked by environment"
+                  : setup.trakt.configured
+                    ? "Configured — enter to replace"
+                    : "Paste Trakt client secret"
+              }
+            />
+          </label>
+          <button
+            className="secondary"
+            disabled={
+              integrationBusy ||
+              (!setup.trakt.configured &&
+                ((!setup.trakt.client_id_overridden && !clientID) ||
+                  (!setup.trakt.client_secret_overridden && !clientSecret)))
+            }
+            onClick={() => void saveTraktCredentials()}
+          >
+            Save Trakt credentials
+          </button>
         </div>
       </div>
       <div className="settings-card">
@@ -1239,13 +1347,70 @@ function SettingsView({
         <div className="integration-row">
           <div>
             <strong>Discord announcements</strong>
-            <small>Outbound-only; managed through encrypted setup</small>
+            <small>
+              Outbound-only announcements through a write-only webhook
+            </small>
           </div>
           <span
             className={`state ${integrations.discord.enabled ? "confirmed" : ""}`}
           >
             {integrations.discord.status}
           </span>
+        </div>
+        <div className="discord-settings">
+          <div className="toggle-row">
+            <div>
+              <strong>Enable Discord</strong>
+              <small>Send outbound WatchWeaver announcements.</small>
+            </div>
+            <button
+              role="switch"
+              aria-label="Enable Discord announcements"
+              aria-checked={discordEnabled}
+              className={`toggle ${discordEnabled ? "on" : ""}`}
+              onClick={() => setDiscordEnabled(!discordEnabled)}
+            >
+              <span />
+            </button>
+          </div>
+          <label>
+            Discord webhook URL
+            <input
+              disabled={setup.discord.webhook_overridden}
+              type="password"
+              value={webhook}
+              onChange={(e) => setWebhook(e.target.value)}
+              autoComplete="new-password"
+              placeholder={
+                setup.discord.webhook_overridden
+                  ? "Locked by environment"
+                  : setup.discord.configured
+                    ? "Configured — enter to replace"
+                    : "https://discord.com/api/webhooks/…"
+              }
+            />
+          </label>
+          <div className="settings-actions">
+            <button
+              className="primary"
+              disabled={
+                integrationBusy ||
+                (discordEnabled && !webhook && !setup.discord.configured)
+              }
+              onClick={() => void saveDiscord()}
+            >
+              Save Discord
+            </button>
+            {setup.discord.configured && (
+              <button
+                className="secondary"
+                disabled={integrationBusy}
+                onClick={() => void testDiscord()}
+              >
+                Send test
+              </button>
+            )}
+          </div>
         </div>
         <div className="override-note">
           Saved webhook URLs are encrypted and write-only. WatchWeaver reports

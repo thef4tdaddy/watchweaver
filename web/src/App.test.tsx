@@ -61,6 +61,7 @@ beforeEach(() => {
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/integrations") return json(currentIntegrations);
+      if (path === "/api/setup") return json({ complete: true, encrypted_storage: true, trakt: { configured: true, authorization_status: "connected", client_id_overridden: false, client_secret_overridden: false }, discord: { configured: true, enabled: false, webhook_overridden: false } });
       if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
       if (path === "/api/inbox")
         return json({
@@ -232,6 +233,7 @@ describe("WatchWeaver dashboard", () => {
     expect(
       await screen.findByText("Private network required"),
     ).toBeInTheDocument();
+    expect(screen.getAllByText("Private network required")).toHaveLength(1);
     expect(
       screen.getByText(
         "Trakt VIP is currently required for new API applications.",
@@ -309,6 +311,15 @@ describe("WatchWeaver dashboard", () => {
       ),
     );
   });
+  it("manages Discord configuration from settings", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Enable Discord announcements" }));
+    fireEvent.change(screen.getByLabelText("Discord webhook URL"), { target: { value: "https://discord.com/api/webhooks/example" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Discord" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/integrations/discord/config", expect.objectContaining({ method: "PUT", body: JSON.stringify({ webhook_url: "https://discord.com/api/webhooks/example", enabled: true }) })));
+  });
   it("immediately shows the confirmed Serializd checkpoint", async () => {
     render(<App />);
     await screen.findByText("The Example");
@@ -354,14 +365,20 @@ describe("WatchWeaver dashboard", () => {
       if (path === "/api/update") return json({ state: "development", running_version: "dev", channel: "development", enabled: true });
       return json({ error: "not found" }, 404);
     });
+    currentIntegrations = { ...integrations, trakt: { ...integrations.trakt, sync: { ...integrations.trakt.sync, running: true } } };
     render(<App />);
     expect(await screen.findByText(/Syncing with Trakt/i)).toBeInTheDocument();
     expect(screen.queryByText("No rating prompts waiting")).not.toBeInTheDocument();
-    currentIntegrations = { ...integrations, trakt: { ...integrations.trakt, poll: { phase: "idle", consecutive_failures: 0 } } };
+    currentIntegrations = integrations;
     await new Promise((resolve) => window.setTimeout(resolve, 3100));
     await waitFor(() => expect(screen.getByText("No rating prompts waiting")).toBeInTheDocument());
     expect(inboxCalls).toBeGreaterThan(1);
   }, 5000);
+  it("treats scheduled polling as idle rather than an active sync", async () => {
+    render(<App />);
+    expect(await screen.findByText("The Example")).toBeInTheDocument();
+    expect(screen.queryByText(/Syncing with Trakt/i)).not.toBeInTheDocument();
+  });
   it("shows the running version and update guidance", async () => {
     render(<App />);
     expect(await screen.findByText("Version 0.1.0-beta.1")).toBeInTheDocument();
