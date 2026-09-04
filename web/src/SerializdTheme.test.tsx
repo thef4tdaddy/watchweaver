@@ -76,9 +76,17 @@ describe("Serializd checkpoint theme states", () => {
     expect(screen.getByRole("link", { name: /Open importer/ })).toHaveClass(
       "primary",
     );
-    expect(screen.getByRole("button", { name: "Mark synced" })).toHaveClass(
-      "secondary",
-    );
+    expect(
+      screen.getByRole("button", {
+        name: "I completed the Serializd import",
+      }),
+    ).toHaveClass("secondary");
+    expect(
+      screen.getByText("Why confirmation is manual"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/it is not your latest Trakt check or episode watch/i),
+    ).toBeInTheDocument();
   });
 
   it("renders the due checkpoint with the warning-state theme hook", async () => {
@@ -90,5 +98,8 @@ describe("Serializd checkpoint theme states", () => {
     expect(heading.closest(".hero-panel")).toHaveClass("tv", "due");
     expect(screen.getByText("21 transferable changes since your last confirmation."))
       .toBeInTheDocument();
+    expect(
+      screen.getByText("Last Serializd import confirmed"),
+    ).toBeInTheDocument();
   });
 });

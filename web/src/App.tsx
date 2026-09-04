@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
+import TraktAccessNote from "./TraktAccessNote";
 import {
   APIError,
   type Batch,
@@ -18,12 +19,12 @@ import {
 
 type View = "inbox" | "history" | "movies" | "tv" | "status" | "settings";
 const nav: [View, string, string][] = [
-  ["inbox", "Inbox", "⌁"],
-  ["history", "History", "◷"],
-  ["movies", "Movies", "◇"],
-  ["tv", "Television", "▱"],
-  ["status", "Status", "!"],
-  ["settings", "Settings", "⚙"],
+  ["inbox", "Inbox", "inbox"],
+  ["history", "History", "history"],
+  ["movies", "Movies", "movies"],
+  ["tv", "Television", "television"],
+  ["status", "Status", "status"],
+  ["settings", "Settings", "settings"],
 ];
 const stars = Array.from({ length: 10 }, (_, i) => i + 1);
 
@@ -61,8 +62,10 @@ function App() {
               key={id}
               className={view === id ? "active" : ""}
               onClick={() => setView(id)}
+              aria-label={label}
+              title={label}
             >
-              <span>{icon}</span>
+              <span className={`nav-icon ${icon}`} aria-hidden="true" />
               {label}
               {id === "inbox" && <i>•</i>}
             </button>
@@ -211,6 +214,7 @@ function StatusView({
               </span>
             </div>
             <p>{component.detail}</p>
+            {name === "trakt" && <TraktAccessNote compact />}
             {name === "backup" && status.backup.last_backup && (
               <p>
                 Latest backup: {formatDate(status.backup.last_backup)} ·{" "}
@@ -794,7 +798,7 @@ function Television({ onError }: { onError: (v: string) => void }) {
             disabled={marking}
             onClick={() => void mark()}
           >
-            {marking ? "Saving…" : "Mark synced"}
+            {marking ? "Saving…" : "I completed the Serializd import"}
           </button>
         </div>
       </div>
@@ -814,7 +818,7 @@ function Television({ onError }: { onError: (v: string) => void }) {
               ? formatDate(status.last_confirmed_at)
               : "Never"
           }
-          label="Last confirmed"
+          label="Last Serializd import confirmed"
         />
       </div>
       {!status.last_confirmed_at && status.tracked_episode_watches > 0 && (
@@ -823,7 +827,8 @@ function Television({ onError }: { onError: (v: string) => void }) {
           <p>
             Existing Trakt history is your starting baseline, so it is tracked
             without being counted as new. After running the Serializd importer,
-            choose Mark synced to start counting changes from today.
+            choose I completed the Serializd import to start counting changes
+            from today.
           </p>
         </div>
       )}
@@ -854,6 +859,14 @@ function Television({ onError }: { onError: (v: string) => void }) {
             label="Elapsed threshold"
           />
         </div>
+      </div>
+      <div className="checkpoint-explanation">
+        <strong>Why confirmation is manual</strong>
+        <p>
+          Serializd does not report a completed import back to WatchWeaver. The
+          confirmation time changes only when you say the import is complete;
+          it is not your latest Trakt check or episode watch.
+        </p>
       </div>
     </section>
   );

@@ -196,7 +196,11 @@ describe("WatchWeaver dashboard", () => {
       await screen.findByText("Television is in rhythm"),
     ).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Mark synced" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", {
+        name: "I completed the Serializd import",
+      }),
+    ).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(
       await screen.findByText("Integration availability"),
@@ -204,6 +208,31 @@ describe("WatchWeaver dashboard", () => {
     expect(
       screen.queryByText(/webhook-secret|access_token|refresh_token/i),
     ).not.toBeInTheDocument();
+  });
+  it("uses aligned local icons and explains Trakt API access on Status", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    const navigation = screen.getByRole("navigation", {
+      name: "Main navigation",
+    });
+    expect(navigation.querySelectorAll(".nav-icon")).toHaveLength(6);
+    expect(
+      screen.getByRole("button", { name: "Inbox" }).querySelector(".inbox"),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole("button", { name: "Settings" })
+        .querySelector(".settings"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
+    expect(
+      await screen.findByText(
+        "Trakt VIP is currently required for new API applications.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/This is a Trakt policy, not a WatchWeaver subscription/i),
+    ).toBeInTheDocument();
   });
   it("submits exact canonical rating values", async () => {
     render(<App />);
@@ -277,7 +306,11 @@ describe("WatchWeaver dashboard", () => {
     render(<App />);
     await screen.findByText("The Example");
     fireEvent.click(screen.getByRole("button", { name: /Television/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Mark synced" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "I completed the Serializd import",
+      }),
+    );
     await waitFor(() =>
       expect(screen.queryByText("Never")).not.toBeInTheDocument(),
     );

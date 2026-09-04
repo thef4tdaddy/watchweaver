@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import App from "./App";
 import { request } from "./api";
+import TraktAccessNote from "./TraktAccessNote";
 import "./setup.css";
 
 type Setup = {
@@ -223,7 +224,7 @@ function SetupDialog({
       <div className="setup-dialog">
         <div className="setup-heading">
           <div>
-            <span>PRIVATE LAN / VPN ONLY</span>
+            <span className="network-boundary">PRIVATE LAN / VPN ONLY</span>
             <h1>
               {required ? "Set up WatchWeaver" : "Configure integrations"}
             </h1>
@@ -242,7 +243,8 @@ function SetupDialog({
         {message && <div className="setup-message">{message}</div>}
         <section>
           <h2>1. Trakt</h2>
-          <p>Trakt is an optional integration for people with Trakt VIP or an existing valid API application, and is the only automated watch-history source in this release. WatchWeaver itself does not require a subscription.</p>
+          <TraktAccessNote />
+          <p>Trakt is the automated watch-history source in this release.</p>
           <details className="trakt-guide">
             <summary>How to get your Trakt Client ID and Secret</summary>
             <ol>
