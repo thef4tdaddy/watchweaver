@@ -49,7 +49,7 @@ At minimum this includes:
 - high-water mark / equivalent durable local reference needed to count later relevant activity
 - reminder state so the same overdue condition does not spam notifications
 
-The checkpoint advances only when the user explicitly chooses `Mark synced` after completing the Serializd Trakt import.
+The checkpoint advances only when the user explicitly chooses `I completed the Serializd import` after completing the Serializd Trakt import.
 
 Opening the Serializd page or viewing the reminder does not advance the checkpoint.
 
@@ -98,7 +98,7 @@ The intended v0.1 flow is:
 2. The dashboard shows pending Serializd activity and due status.
 3. When due, WatchWeaver offers a link to Serializd's official Trakt import page.
 4. The user runs the import on Serializd.
-5. The user returns to WatchWeaver and chooses `Mark synced`.
+5. The user returns to WatchWeaver and chooses `I completed the Serializd import`.
 6. WatchWeaver records the new confirmation checkpoint and resets the pending reminder state.
 
 WatchWeaver must never infer successful Serializd synchronization merely from opening a link or elapsed time.
@@ -149,7 +149,7 @@ The Serializd integration is sufficient for v0.1 when WatchWeaver can:
 3. Treat new/changed supported ratings as pending transferable changes where applicable.
 4. Determine due state using configurable defaults of 20 changes OR 14 days with at least one pending change.
 5. Link the user to Serializd's official Trakt importer.
-6. Provide an explicit `Mark synced` action.
+6. Provide an explicit `I completed the Serializd import` action.
 7. Send at most one Discord announcement per unchanged due state when Discord is enabled.
 8. Clearly distinguish unsupported data such as reviews and season ratings from data the importer documents as transferable.
 9. Never claim automatic verification of successful Serializd import.

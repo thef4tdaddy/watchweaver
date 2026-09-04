@@ -18,7 +18,7 @@ Run this checklist from a clean checkout before creating a release tag. It compl
 - [ ] Submit an exact half-star rating and review in the web inbox. Force a Trakt failure, restart, then recover it; confirm the local value never disappears and the pending write is eventually acknowledged once.
 - [ ] Add a movie rewatch. Confirm both watch events remain in History while only one current rating and review exist.
 - [ ] Generate a Letterboxd batch around the configured timezone’s date boundary. Restart before confirmation, download the same generated batch, inspect same-day duplicate warnings, then explicitly mark it imported.
-- [ ] Reach both Serializd reminder thresholds independently. Restart while overdue, open the official importer, and confirm the checkpoint changes only after “Mark synced.”
+- [ ] Reach both Serializd reminder thresholds independently. Restart while overdue, open the official importer, and confirm the checkpoint changes only after “I completed the Serializd import.”
 - [ ] Disable Discord, Serializd reminders, and Trakt credentials independently and verify local history, inbox, Letterboxd, settings, and health remain usable. Re-enable a failing Discord endpoint and confirm conservative retry without backlog flooding.
 - [ ] Stop the container with SIGTERM and confirm it exits within the Compose grace period. Recreate it with the same `/data` volume and verify authorization, history, ratings, reviews, export state, and checkpoints persist.
 
