@@ -9,7 +9,7 @@
 
 ## What is WatchWeaver?
 
-WatchWeaver is a self-hosted media tracking service that uses Trakt as a watch-history source and routes that activity into useful workflows for rating, reviewing, and synchronizing movies and television.
+WatchWeaver is a self-hosted media tracking service that receives watch history from Trakt or Jellyfin and routes that activity into useful workflows for rating, reviewing, and synchronizing movies and television.
 
 The goal is to let your media server or scrobbler keep tracking automatically while WatchWeaver handles what comes afterward.
 
@@ -43,6 +43,18 @@ Jellyfin / Plex / other scrobblers
 ```
 
 Trakt is intended to provide automated viewing activity. WatchWeaver maintains its own application state and uses supported integration paths for downstream services rather than requiring those services to be the source of truth.
+
+## Jellyfin plugin
+
+The official [WatchWeaver Jellyfin plugin](https://github.com/thef4tdaddy/watchweaver-jellyfin) sends completed movie and episode activity directly from Jellyfin to WatchWeaver. It is distributed separately because it runs inside Jellyfin and follows Jellyfin's plugin compatibility requirements.
+
+Add this repository URL in **Jellyfin Dashboard → Plugins → Repositories**:
+
+```text
+https://thef4tdaddy.github.io/watchweaver-jellyfin/manifest.json
+```
+
+Installation, compatibility, configuration, and troubleshooting instructions are maintained in the [plugin repository](https://github.com/thef4tdaddy/watchweaver-jellyfin#readme). Keep WatchWeaver and the plugin on compatible `0.x` release lines. Both services are intended for trusted LAN/VPN use and should not be exposed directly to the public internet.
 
 ## Project principles
 
