@@ -1,5 +1,7 @@
 # WatchWeaver
 
+[![codecov](https://codecov.io/gh/thef4tdaddy/watchweaver/graph/badge.svg?token=MLLPZB1ZMV)](https://codecov.io/gh/thef4tdaddy/watchweaver)
+
 **Self-hosted watch history, ratings, and reviews across Trakt, Letterboxd, Serializd, and Discord.**
 
 ![WatchWeaver logo, icon treatments, and color palette](docs/assets/watchweaver-brand-guide.png)
