@@ -36,7 +36,6 @@ function App() {
   const [view, setView] = useState<View>("inbox");
   const [integrations, setIntegrations] = useState<Integrations>();
   const [error, setError] = useState("");
-  const [dataRevision, setDataRevision] = useState(0);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>();
   const refreshIntegrations = useCallback(
     () =>
@@ -54,11 +53,6 @@ function App() {
     const timer = window.setInterval(() => void refreshIntegrations(), 3000);
     return () => window.clearInterval(timer);
   }, [refreshIntegrations]);
-  const refreshCurrentView = useCallback(() => {
-    void refreshIntegrations();
-    void refreshUpdate();
-    setDataRevision((value) => value + 1);
-  }, [refreshIntegrations, refreshUpdate]);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -102,14 +96,6 @@ function App() {
             <p className="eyebrow">WATCHWEAVER / {view.toUpperCase()}</p>
             <h1>{nav.find((n) => n[0] === view)?.[1]}</h1>
           </div>
-          <button
-            className="icon-button"
-            onClick={refreshCurrentView}
-            aria-label={`Refresh ${nav.find((n) => n[0] === view)?.[1]} data`}
-            title="Refresh current page data"
-          >
-            ↻
-          </button>
         </header>
         {error && (
           <div className="alert" role="alert">
@@ -119,7 +105,6 @@ function App() {
         )}
         {view === "inbox" && (
           <Inbox
-            key={`inbox-${dataRevision}`}
             onError={setError}
             syncRunning={integrations?.trakt.sync.running === true}
             syncPhase={integrations?.trakt.poll.phase}
@@ -127,12 +112,11 @@ function App() {
             integrationLoaded={integrations !== undefined}
           />
         )}{" "}
-        {view === "history" && <History key={`history-${dataRevision}`} onError={setError} />}{" "}
-        {view === "movies" && <Movies key={`movies-${dataRevision}`} onError={setError} />}{" "}
-        {view === "tv" && <Television key={`tv-${dataRevision}`} onError={setError} />}{" "}
+        {view === "history" && <History onError={setError} />}{" "}
+        {view === "movies" && <Movies onError={setError} />}{" "}
+        {view === "tv" && <Television onError={setError} />}{" "}
         {view === "status" && (
           <StatusView
-            key={`status-${dataRevision}`}
             updateStatus={updateStatus}
             setUpdateStatus={setUpdateStatus}
             onNavigate={setView}
@@ -142,7 +126,6 @@ function App() {
         )}{" "}
         {view === "settings" && (
           <SettingsView
-            key={`settings-${dataRevision}`}
             updateStatus={updateStatus}
             refreshUpdate={refreshUpdate}
             integrations={integrations}

@@ -13,6 +13,7 @@ func TestEvaluateRules(t *testing.T) {
 	}{
 		{name: "baseline silent", in: Batch{Baseline: true, NewMovieWatches: []int64{1}}, want: nil},
 		{name: "movie watch", in: Batch{NewMovieWatches: []int64{1}}, want: []Decision{{Kind: MovieRating, MediaID: 1}}},
+		{name: "explicit completed season", in: Batch{CompletedSeasonIDs: []int64{10}}, want: []Decision{{Kind: SeasonRating, MediaID: 10}}},
 		{name: "movie rewatch remains eligible", in: Batch{NewMovieWatches: []int64{1, 1}}, want: []Decision{{Kind: MovieRating, MediaID: 1}, {Kind: MovieRating, MediaID: 1}}},
 		{name: "ignored movie silent", in: Batch{NewMovieWatches: []int64{1}, IgnoredMovieIDs: map[int64]bool{1: true}}, want: []Decision{}},
 		{name: "weekly caught up", in: Batch{NewEpisodeIDs: []int64{2}, Seasons: []SeasonState{{SeasonID: 10, ShowID: 100, InventoryKnown: true, Episodes: []Episode{{ID: 1, Number: 1, Released: true, Watched: true, Normal: true}, {ID: 2, Number: 2, Released: true, Watched: true, Normal: true}, {ID: 3, Number: 3, Released: false, Normal: true}}}}}, want: []Decision{{Kind: EpisodeRating, MediaID: 2}}},

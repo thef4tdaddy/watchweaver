@@ -193,6 +193,11 @@ describe("WatchWeaver dashboard", () => {
       screen.getByText(/does not create a historical snapshot/i),
     ).toBeInTheDocument();
   });
+  it("does not show the ambiguous local refresh button", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    expect(screen.queryByRole("button", { name: /Refresh Inbox data/ })).not.toBeInTheDocument();
+  });
   it("navigates to Serializd status and settings without rendering secrets", async () => {
     render(<App />);
     await screen.findByText("The Example");

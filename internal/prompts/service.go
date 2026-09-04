@@ -81,7 +81,11 @@ func (s *Service) preferences(ctx context.Context) (bool, bool, error) {
 
 func insertDecision(ctx context.Context, tx *sql.Tx, decision Decision) (bool, error) {
 	var exists int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND task_type='rating' AND state IN ('pending','snoozed')`, decision.MediaID).Scan(&exists)
+	query := `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND task_type='rating' AND state IN ('pending','snoozed')`
+	if decision.Kind == SeasonRating {
+		query = `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND task_type='rating'`
+	}
+	err := tx.QueryRowContext(ctx, query, decision.MediaID).Scan(&exists)
 	if err != nil {
 		return false, err
 	}

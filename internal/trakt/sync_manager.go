@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/thef4tdaddy/watchweaver/internal/prompts"
 )
 
 var ErrSyncInProgress = errors.New("trakt sync is already running")
@@ -180,10 +182,35 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 	}
 	poller := NewPoller(m.db, importer, PollerOptions{Overlap: m.options.Overlap, MaxRetries: 3, Now: m.options.Now})
 	log.Printf("Trakt incremental history poll started (checkpoint overlap=%s)", m.options.Overlap)
-	if err := poller.Poll(ctx); err != nil {
+	pollResult, err := poller.PollResult(ctx)
+	if err != nil {
 		return result, err
 	}
 	log.Printf("Trakt incremental history poll completed")
+	finaleSeasonIDs := pollResult.FinaleSeasonIDs
+	if complete, err := m.state(ctx, "finale_prompt_backfill_complete"); err != nil {
+		return result, err
+	} else if complete != "1" {
+		log.Printf("Trakt finale prompt reconciliation started")
+		backfill, err := importer.ImportIncrementalSince(ctx, time.Time{})
+		if err != nil {
+			return result, err
+		}
+		for _, seasonID := range backfill.FinaleSeasonIDs {
+			finaleSeasonIDs = appendUnique(finaleSeasonIDs, seasonID)
+		}
+		if err := m.set(ctx, "finale_prompt_backfill_complete", "1"); err != nil {
+			return result, err
+		}
+		log.Printf("Trakt finale prompt reconciliation completed: seasons=%d", len(backfill.FinaleSeasonIDs))
+	}
+	if len(finaleSeasonIDs) > 0 {
+		created, err := prompts.NewService(m.db).Apply(ctx, prompts.Batch{CompletedSeasonIDs: finaleSeasonIDs})
+		if err != nil {
+			return result, err
+		}
+		log.Printf("Trakt finale prompts evaluated: seasons=%d created=%d", len(finaleSeasonIDs), len(created))
+	}
 	ratings := NewRatingSync(m.db, m.options.BaseURL, m.options.HTTPClient, clientID, token)
 	ratings.SetNow(m.options.Now)
 	if err := ratings.ImportInitial(ctx); err != nil {
@@ -299,4 +326,13 @@ func (m *SyncManager) Status(ctx context.Context) (SyncStatus, error) {
 func (m *SyncManager) set(ctx context.Context, key, value string) error {
 	_, err := m.db.ExecContext(ctx, `INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt',?,?) ON CONFLICT(integration,state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, key, value)
 	return err
+}
+
+func (m *SyncManager) state(ctx context.Context, key string) (string, error) {
+	var value string
+	err := m.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key=?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return value, err
 }
