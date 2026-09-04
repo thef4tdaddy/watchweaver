@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
-FROM node:22-alpine AS frontend
-ARG VERSION=dev
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+ARG VERSION=dev
 RUN VITE_APP_VERSION=${VERSION} npm run build
 
-FROM golang:1.22-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS backend
 WORKDIR /src
 RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
