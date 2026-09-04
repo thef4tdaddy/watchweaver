@@ -1,0 +1,22 @@
+name: Documentation or setup problem
+description: Report unclear, missing, or incorrect setup and operating guidance.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Where is the problem?
+      description: Link the page or name the screen, setting, integration, or deployment step.
+    validations:
+      required: true
+  - type: textarea
+    id: unclear
+    attributes:
+      label: What is unclear or incorrect?
+    validations:
+      required: true
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Suggested clarification

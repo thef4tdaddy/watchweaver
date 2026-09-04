@@ -1,0 +1,59 @@
+name: Bug report
+description: Report reproducible WatchWeaver behavior that is broken or unexpected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve WatchWeaver. Remove tokens, webhook URLs, private media history, and other secrets before submitting.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      placeholder: |
+        1. Open …
+        2. Select …
+        3. Observe …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: WatchWeaver version
+      description: Shown at the bottom of the sidebar or in the container image labels.
+      placeholder: 0.1.0-beta.16
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker / Docker Compose
+        - Native binary
+        - Development checkout
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics or logs
+      description: Attach the in-app diagnostics file or relevant container logs after checking that secrets and private history are absent.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, tokens, webhook URLs, and private viewing details.
+          required: true
+        - label: WatchWeaver is deployed on a private LAN/VPN, or I understand that public exposure is unsupported.
+          required: true

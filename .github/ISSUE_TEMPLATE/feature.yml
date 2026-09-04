@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a user-facing improvement or new integration.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the workflow or limitation, not only the proposed control.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Explain what a successful user experience would look like.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Data, privacy, or synchronization considerations
+      description: Note duplicate handling, source-of-truth expectations, LAN/VPN assumptions, or destructive actions.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: Optional—tell us how you handle this today.
