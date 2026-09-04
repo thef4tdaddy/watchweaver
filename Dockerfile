@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1.7
 FROM node:22-alpine AS frontend
+ARG VERSION=dev
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-RUN npm run build
+RUN VITE_APP_VERSION=${VERSION} npm run build
 
 FROM golang:1.22-alpine AS backend
 WORKDIR /src
@@ -14,10 +15,12 @@ RUN go mod download
 COPY . ./
 RUN rm -rf internal/server/static
 COPY --from=frontend /src/web/dist ./internal/server/static
-ARG TARGETOS TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/watchweaver ./cmd/watchweaver
+ARG TARGETOS TARGETARCH VERSION=dev REVISION=
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" -o /out/watchweaver ./cmd/watchweaver
 
 FROM alpine:3.22
+ARG VERSION=dev REVISION=
+LABEL org.opencontainers.image.version=$VERSION org.opencontainers.image.revision=$REVISION
 RUN apk add --no-cache ca-certificates tzdata && addgroup -S -g 10001 watchweaver && adduser -S -D -H -u 10001 -G watchweaver watchweaver && mkdir -p /data/backups /data/exports && chown -R watchweaver:watchweaver /data
 COPY --from=backend /out/watchweaver /usr/local/bin/watchweaver
 USER watchweaver

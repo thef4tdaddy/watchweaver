@@ -33,6 +33,13 @@ type API struct {
 	discord           *discord.Notifier
 	traktSync         *trakt.SyncManager
 	discordConfigured bool
+	version           string
+	revision          string
+	updateURL         string
+	updateTagsURL     string
+	compareBaseURL    string
+	updateClient      *http.Client
+	updateCache       updateCache
 }
 
 func (a *API) SetDiscordConfigured(configured bool)           { a.discordConfigured = configured }
@@ -41,7 +48,7 @@ func (a *API) SetDiscordNotifier(notifier *discord.Notifier)  { a.discord = noti
 func (a *API) SetTraktSyncManager(manager *trakt.SyncManager) { a.traktSync = manager }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
-	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService}
+	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService, version: "dev", updateURL: "https://api.github.com/repos/thef4tdaddy/watchweaver/releases", updateTagsURL: "https://api.github.com/repos/thef4tdaddy/watchweaver/tags", compareBaseURL: "https://github.com/thef4tdaddy/watchweaver/compare/", updateClient: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type mediaJSON struct {
@@ -91,6 +98,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings", a.settings)
 	mux.HandleFunc("/api/integrations", a.integrationStatus)
 	mux.HandleFunc("/api/status", a.operationalStatus)
+	mux.HandleFunc("/api/update", a.update)
 	mux.HandleFunc("/api/diagnostics", a.diagnostics)
 	mux.HandleFunc("/api/setup", a.setupStatus)
 	mux.HandleFunc("/api/integrations/trakt/config", a.traktConfig)
@@ -645,6 +653,7 @@ type settingsJSON struct {
 	SerializdEnabled         bool   `json:"serializd_enabled"`
 	SerializdReminderChanges int    `json:"serializd_reminder_changes"`
 	SerializdReminderDays    int    `json:"serializd_reminder_days"`
+	UpdateChecksEnabled      bool   `json:"update_checks_enabled"`
 }
 
 type settingsUpdateJSON struct {
@@ -655,6 +664,7 @@ type settingsUpdateJSON struct {
 	SerializdEnabled         *bool   `json:"serializd_enabled"`
 	SerializdReminderChanges *int    `json:"serializd_reminder_changes"`
 	SerializdReminderDays    *int    `json:"serializd_reminder_days"`
+	UpdateChecksEnabled      *bool   `json:"update_checks_enabled"`
 }
 
 func (a *API) settings(w http.ResponseWriter, r *http.Request) {
@@ -697,6 +707,9 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 		if update.SerializdReminderDays != nil {
 			body.SerializdReminderDays = *update.SerializdReminderDays
 		}
+		if update.UpdateChecksEnabled != nil {
+			body.UpdateChecksEnabled = *update.UpdateChecksEnabled
+		}
 		if _, err := time.LoadLocation(body.Timezone); err != nil {
 			badRequest(w, "timezone must be a valid IANA timezone")
 			return
@@ -715,7 +728,7 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback()
-		values := map[string]string{"timezone": body.Timezone, "trakt_poll_minutes": strconv.Itoa(body.TraktPollMinutes), "prompt_movies_enabled": strconv.FormatBool(body.PromptMoviesEnabled), "prompt_tv_enabled": strconv.FormatBool(body.PromptTVEnabled), "serializd_enabled": strconv.FormatBool(body.SerializdEnabled), "serializd_reminder_changes": strconv.Itoa(body.SerializdReminderChanges), "serializd_reminder_days": strconv.Itoa(body.SerializdReminderDays)}
+		values := map[string]string{"timezone": body.Timezone, "trakt_poll_minutes": strconv.Itoa(body.TraktPollMinutes), "prompt_movies_enabled": strconv.FormatBool(body.PromptMoviesEnabled), "prompt_tv_enabled": strconv.FormatBool(body.PromptTVEnabled), "serializd_enabled": strconv.FormatBool(body.SerializdEnabled), "serializd_reminder_changes": strconv.Itoa(body.SerializdReminderChanges), "serializd_reminder_days": strconv.Itoa(body.SerializdReminderDays), "update_checks_enabled": strconv.FormatBool(body.UpdateChecksEnabled)}
 		for key, value := range values {
 			if _, err = tx.ExecContext(r.Context(), `INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, key, value); err != nil {
 				internalError(w)
@@ -732,8 +745,8 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *API) loadSettings(ctx context.Context) (settingsJSON, error) {
-	out := settingsJSON{Timezone: "UTC", TraktPollMinutes: 5, PromptMoviesEnabled: true, PromptTVEnabled: true, SerializdReminderChanges: 20, SerializdReminderDays: 14}
-	rows, err := a.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('timezone','trakt_poll_minutes','prompt_movies_enabled','prompt_tv_enabled','serializd_enabled','serializd_reminder_changes','serializd_reminder_days')`)
+	out := settingsJSON{Timezone: "UTC", TraktPollMinutes: 5, PromptMoviesEnabled: true, PromptTVEnabled: true, SerializdReminderChanges: 20, SerializdReminderDays: 14, UpdateChecksEnabled: true}
+	rows, err := a.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('timezone','trakt_poll_minutes','prompt_movies_enabled','prompt_tv_enabled','serializd_enabled','serializd_reminder_changes','serializd_reminder_days','update_checks_enabled')`)
 	if err != nil {
 		return out, err
 	}
@@ -758,6 +771,8 @@ func (a *API) loadSettings(ctx context.Context) (settingsJSON, error) {
 			out.SerializdReminderChanges, _ = strconv.Atoi(v)
 		case "serializd_reminder_days":
 			out.SerializdReminderDays, _ = strconv.Atoi(v)
+		case "update_checks_enabled":
+			out.UpdateChecksEnabled, _ = strconv.ParseBool(v)
 		}
 	}
 	return out, rows.Err()

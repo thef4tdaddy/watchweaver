@@ -15,6 +15,8 @@
 .sidebar nav button:hover,.sidebar nav button.active{background:linear-gradient(90deg,#5121cc99,#2563eb55);color:#fff}
 .sidebar nav button i{color:var(--cyan)}
 .sidebar-foot{border-color:var(--line)}
+.version-label{color:var(--muted);font-size:11px;margin-top:4px}.mobile-version{display:none;color:var(--muted)}.update-card{margin:16px 0}.update-card a{color:var(--cyan)}
+@media(max-width:850px){.mobile-version{display:block}}
 .status-dot>span{background:#64748b}.status-dot>span.ok{background:var(--cyan);box-shadow:0 0 0 3px #22d3ee24}
 .eyebrow{color:#7dd3fc}.icon-button{color:var(--cyan)}.icon-button:hover{border-color:var(--cyan)}
 .primary{background:linear-gradient(135deg,#7c3aed,#4338ca)}.primary:hover{background:linear-gradient(135deg,#a855ff,#2563eb)}
