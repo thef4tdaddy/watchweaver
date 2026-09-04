@@ -6,6 +6,12 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 const json=(body:unknown,status=200)=>Promise.resolve(new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}}))
 
 describe('first-run setup',()=>{
+  it('does not show onboarding controls after setup is complete',async()=>{
+    vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>String(input)==='/api/setup'?json({complete:true,encrypted_storage:true,trakt:{configured:true,authorization_status:'connected',client_id_overridden:false,client_secret_overridden:false},discord:{configured:false,enabled:false,webhook_overridden:false}}):json({error:'not found'},404)))
+    render(<SetupGate/>);await waitFor(()=>expect(screen.queryByText('Starting WatchWeaver…')).not.toBeInTheDocument())
+    expect(screen.queryByRole('button',{name:'Configure integrations'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog',{name:'WatchWeaver setup'})).not.toBeInTheDocument()
+  })
   it('shows the branded startup artwork while setup status loads',()=>{
     vi.stubGlobal('fetch',vi.fn(()=>new Promise(()=>{})))
     render(<SetupGate/>);expect(screen.getByRole('img',{name:'WatchWeaver'})).toHaveAttribute('src','/brand/watchweaver-splash.png')

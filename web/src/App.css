@@ -42,3 +42,4 @@ textarea,input{background:#020617;color:var(--ink)}
 .trakt-access-note{margin:14px 0;padding:14px;border:1px solid var(--violet);border-left:4px solid var(--cyan);border-radius:10px;background:#172554}
 .trakt-access-note strong{color:#e0f2fe}.trakt-access-note p{margin:6px 0;color:#cbd5e1;font-size:13px}.trakt-access-note a{color:var(--cyan);font-weight:800}.trakt-access-note.compact{margin-bottom:4px}
 .network-boundary-note{margin:0 0 20px;padding:14px 16px;border:1px solid var(--cyan);border-left:4px solid var(--cyan);border-radius:10px;background:#164e63;color:#cffafe}.network-boundary-note p{margin:5px 0 0;color:#cffafe;font-size:13px}
+.credential-fields,.discord-settings{margin-top:18px;padding-top:4px}.settings-actions{display:flex;gap:10px;flex-wrap:wrap}.success-message{color:#a5f3fc;font-size:13px;font-weight:700}.settings-message{grid-column:1/-1;margin:0;padding:12px 14px;border:1px solid #22d3ee;border-radius:10px;background:#164e63}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -121,10 +122,12 @@ func (m *SyncManager) SyncNow(ctx context.Context) error {
 	}
 	defer m.running.Store(false)
 	started := m.options.Now().UTC()
+	log.Printf("Trakt sync started")
 	_ = m.set(ctx, "sync_last_started", started.Format(time.RFC3339Nano))
 	_ = m.set(ctx, "history_sync_phase", "syncing")
 	result, err := m.cycle(ctx, started)
 	if err != nil {
+		log.Printf("Trakt sync failed after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		_ = m.set(ctx, "sync_last_error", err.Error())
 		_ = m.set(ctx, "history_sync_phase", "error")
 		return err
@@ -141,6 +144,7 @@ func (m *SyncManager) SyncNow(ctx context.Context) error {
 			return err
 		}
 	}
+	log.Printf("Trakt sync completed in %s: history_changes=%d rating_changes=%d pending_ratings_completed=%d pending_ratings_remaining=%d", time.Since(started).Round(time.Millisecond), result.HistoryChanges, result.RatingChanges, result.PendingRatingsCompleted, result.PendingRatingsRemaining)
 	return m.set(ctx, "history_sync_phase", "polling")
 }
 
@@ -167,13 +171,19 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 	}
 	importer := NewHistoryImporter(m.db, m.options.BaseURL, m.options.HTTPClient, token)
 	importer.SetClientID(clientID)
-	if _, err := importer.ImportInitial(ctx); err != nil {
+	initialHistory, err := importer.ImportInitial(ctx)
+	if err != nil {
 		return result, err
 	}
+	if initialHistory.Pages > 0 {
+		log.Printf("Trakt history baseline checked: pages=%d imported=%d skipped=%d", initialHistory.Pages, initialHistory.Imported, initialHistory.Skipped)
+	}
 	poller := NewPoller(m.db, importer, PollerOptions{Overlap: m.options.Overlap, MaxRetries: 3, Now: m.options.Now})
+	log.Printf("Trakt incremental history poll started (checkpoint overlap=%s)", m.options.Overlap)
 	if err := poller.Poll(ctx); err != nil {
 		return result, err
 	}
+	log.Printf("Trakt incremental history poll completed")
 	ratings := NewRatingSync(m.db, m.options.BaseURL, m.options.HTTPClient, clientID, token)
 	ratings.SetNow(m.options.Now)
 	if err := ratings.ImportInitial(ctx); err != nil {

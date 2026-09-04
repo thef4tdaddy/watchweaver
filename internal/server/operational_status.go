@@ -121,7 +121,7 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		return result, err
 	}
 	if letterboxdStatus.PendingRows > 0 {
-		result.Components["letterboxd"] = operationalComponent{State: "needs_attention", Label: "Letterboxd", Detail: "Movie activity is ready to export.", Action: "open"}
+		result.Components["letterboxd"] = operationalComponent{State: "working", Label: "Letterboxd", Detail: "Movie activity is ready to export.", Action: "open"}
 	} else {
 		result.Components["letterboxd"] = operationalComponent{State: "working", Label: "Letterboxd", Detail: "No movie exports are waiting.", Action: "open"}
 	}
