@@ -94,9 +94,16 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 	if a.trakt != nil {
 		auth = a.trakt.Status(ctx)
 	}
+	jellyfinConfigured := false
+	if a.credentials != nil {
+		jellyfinConfigured, _ = a.credentials.Configured(ctx, "jellyfin", jellyfinTokenKey)
+	}
 	traktState, traktDetail, traktAction := "working", "Connected and ready to synchronize.", "sync"
 	if auth.Status != trakt.StatusConnected {
-		traktState, traktDetail, traktAction = "needs_attention", "Trakt needs to be configured or reconnected.", "configure"
+		traktState, traktDetail, traktAction = "needs_attention", "Configure Trakt or Jellyfin to receive watch activity.", "configure"
+		if jellyfinConfigured {
+			traktState, traktDetail = "disabled", "Optional Trakt synchronization is not configured."
+		}
 	}
 	if a.traktSync != nil {
 		syncStatus, err := a.traktSync.Status(ctx)
@@ -110,6 +117,19 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		}
 	}
 	result.Components["trakt"] = operationalComponent{State: traktState, Label: "Trakt", Detail: traktDetail, Action: traktAction}
+	jellyfinStatus, err := a.jellyfinService().Status(ctx, jellyfinConfigured)
+	if err != nil {
+		return result, err
+	}
+	if jellyfinConfigured {
+		detail := "Connected and waiting for events."
+		if jellyfinStatus.LastAcceptedAt != nil {
+			detail = "Events are being accepted durably."
+		}
+		result.Components["jellyfin"] = operationalComponent{State: "working", Label: "Jellyfin", Detail: detail, Action: "configure"}
+	} else {
+		result.Components["jellyfin"] = operationalComponent{State: "disabled", Label: "Jellyfin", Detail: "Jellyfin ingestion is not configured.", Action: "configure"}
+	}
 	discordEnabled := a.discord != nil && a.discord.Configured()
 	if discordEnabled {
 		result.Components["discord"] = operationalComponent{State: "working", Label: "Discord", Detail: "Announcements are enabled and configured.", Action: "test"}
