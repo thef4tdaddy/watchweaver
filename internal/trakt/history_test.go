@@ -21,6 +21,9 @@ func TestHistoryImporterPaginationHierarchyAndBaseline(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("trakt-api-version") != "2" || r.Header.Get("trakt-api-key") != "client" {
 			t.Errorf("missing Trakt authorization headers")
 		}
+		if r.URL.Query().Get("extended") != "full" {
+			t.Errorf("extended=%q want full", r.URL.Query().Get("extended"))
+		}
 		page := r.URL.Query().Get("page")
 		w.Header().Set("X-Pagination-Page-Count", "2")
 		w.Header().Set("Content-Type", "application/json")

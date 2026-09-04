@@ -187,6 +187,9 @@ func (h *HistoryImporter) fetchPage(ctx context.Context, page int, since time.Ti
 	q := u.Query()
 	q.Set("page", strconv.Itoa(page))
 	q.Set("limit", "100")
+	// episode_type (season_finale/series_finale) is extended episode metadata;
+	// compact history responses omit it.
+	q.Set("extended", "full")
 	if !since.IsZero() {
 		q.Set("start_at", since.UTC().Format(time.RFC3339))
 	}
