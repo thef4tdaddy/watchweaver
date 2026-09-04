@@ -98,12 +98,12 @@ function SetupDialog({
   });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (fn: () => Promise<void>, refreshAfter = true) => {
     setBusy(true);
     setMessage("");
     try {
       await fn();
-      onChanged();
+		if (refreshAfter) onChanged();
     } catch (e) {
       setMessage(friendlySetupError((e as Error).message));
     } finally {
@@ -157,11 +157,11 @@ function SetupDialog({
       await request("/api/integrations/discord/test", { method: "POST" });
       setMessage("Test announcement sent.");
     });
-  const generateJellyfinToken = () => run(async () => {
+	const generateJellyfinToken = () => run(async () => {
     const result = await request<{token:string}>("/api/integrations/jellyfin", {method:"POST"});
     setJellyfinToken(result.token);
     setMessage("Jellyfin token generated. Copy it now; WatchWeaver will not show it again.");
-  });
+	}, false);
   const revokeJellyfinToken = () => run(async () => {
     await request("/api/integrations/jellyfin", {method:"DELETE"});
     setJellyfinToken(""); setMessage("Jellyfin token revoked.");

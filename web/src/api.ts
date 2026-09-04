@@ -57,6 +57,7 @@ export type SetupStatus = {
     enabled: boolean;
     webhook_overridden: boolean;
   };
+  jellyfin?: { configured: boolean; protocol_version: number };
 };
 export type UpdateStatus = {
   state: "up_to_date" | "beta_update_available" | "stable_update_available" | "unable" | "disabled" | "development";
@@ -100,7 +101,18 @@ export type TraktStatus = {
   };
 };
 export type Integrations = {
-  trakt: TraktStatus;
+	trakt: TraktStatus;
+	jellyfin?: {
+		configured: boolean;
+		protocol_version: number;
+		accepted_count: number;
+		auth_failure_count: number;
+		last_accepted_at?: string;
+		last_server_version?: string;
+		last_plugin_version?: string;
+		last_rejection_at?: string;
+		last_rejection_code?: string;
+	};
   letterboxd: { enabled: boolean; status: string };
   serializd: { enabled: boolean; status: string };
   discord: { enabled: boolean; status: string };

@@ -8,9 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/thef4tdaddy/watchweaver/internal/metadata"
+	"github.com/thef4tdaddy/watchweaver/internal/prompts"
 )
 
 var (
@@ -42,15 +46,23 @@ type User struct {
 	Name string `json:"name,omitempty"`
 }
 type Item struct {
-	ID                string            `json:"id"`
-	Type              string            `json:"type"`
-	Title             string            `json:"title"`
-	Year              *int              `json:"year,omitempty"`
-	SeriesTitle       string            `json:"series_title,omitempty"`
-	SeasonNumber      *int              `json:"season_number,omitempty"`
-	EpisodeNumber     *int              `json:"episode_number,omitempty"`
-	ProviderIDs       map[string]string `json:"provider_ids,omitempty"`
-	SeriesProviderIDs map[string]string `json:"series_provider_ids,omitempty"`
+	ID                          string            `json:"id"`
+	Type                        string            `json:"type"`
+	Title                       string            `json:"title"`
+	Year                        *int              `json:"year,omitempty"`
+	SeriesTitle                 string            `json:"series_title,omitempty"`
+	SeriesID                    string            `json:"series_id,omitempty"`
+	SeasonID                    string            `json:"season_id,omitempty"`
+	SeasonNumber                *int              `json:"season_number,omitempty"`
+	EpisodeNumber               *int              `json:"episode_number,omitempty"`
+	ProviderIDs                 map[string]string `json:"provider_ids,omitempty"`
+	SeriesProviderIDs           map[string]string `json:"series_provider_ids,omitempty"`
+	SeasonProviderIDs           map[string]string `json:"season_provider_ids,omitempty"`
+	EpisodeType                 string            `json:"episode_type,omitempty"`
+	SeasonEpisodeCount          *int              `json:"season_episode_count,omitempty"`
+	SeasonWatchedEpisodeCount   *int              `json:"season_watched_episode_count,omitempty"`
+	SeasonFutureEpisodeCount    *int              `json:"season_future_episode_count,omitempty"`
+	LatestReleasedEpisodeNumber *int              `json:"latest_released_episode_number,omitempty"`
 }
 type Playback struct {
 	Played          bool     `json:"played"`
@@ -112,6 +124,10 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	previouslyWatched := false
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM watch_events WHERE media_id=? AND deleted_at IS NULL)`, mediaID).Scan(&previouslyWatched); err != nil {
+		return Result{}, err
+	}
 	occurred, _ := time.Parse(time.RFC3339Nano, e.OccurredAt)
 	canonical := occurred.UTC().Format(time.RFC3339Nano)
 	res, err := tx.ExecContext(ctx, `INSERT INTO watch_events(media_id,source,source_event_id,watched_at_utc,source_watched_at,is_baseline) VALUES(?,'jellyfin',?,?,?,0)`, mediaID, trim(e.Server.ID)+":"+trim(e.EventID), canonical, trim(e.OccurredAt))
@@ -126,9 +142,6 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err = createPrompt(ctx, tx, mediaID, watchID, e.Item.Type); err != nil {
-		return Result{}, err
-	}
 	_, err = tx.ExecContext(ctx, `UPDATE jellyfin_ingest_status SET accepted_count=accepted_count+1,last_accepted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_server_version=?,last_plugin_version=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton=1`, trim(e.Server.Version), trim(e.Plugin.Version))
 	if err != nil {
 		return Result{}, err
@@ -136,7 +149,50 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	if err = tx.Commit(); err != nil {
 		return Result{}, err
 	}
+	// The watch is acknowledged once durable. Prompt evaluation is deliberately
+	// downstream so a task failure cannot make the plugin ambiguously redeliver
+	// an already accepted watch.
+	if err := s.evaluatePrompt(ctx, e, mediaID, previouslyWatched); err != nil {
+		log.Printf("Jellyfin prompt evaluation deferred after durable event acceptance: %v", err)
+	}
 	return Result{WatchEventID: watchID, ProtocolVersion: 1}, nil
+}
+
+func (s *Service) evaluatePrompt(ctx context.Context, e Event, mediaID int64, previouslyWatched bool) error {
+	batch := prompts.Batch{}
+	if e.Item.Type == "movie" {
+		batch.NewMovieWatches = []int64{mediaID}
+		_, err := prompts.NewService(s.db).Apply(ctx, batch)
+		return err
+	}
+	if previouslyWatched || e.Item.SeasonNumber == nil || *e.Item.SeasonNumber == 0 {
+		return nil
+	}
+	var seasonID, showID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT season.id,season.parent_id FROM media_items episode JOIN media_items season ON season.id=episode.parent_id WHERE episode.id=?`, mediaID).Scan(&seasonID, &showID); err != nil {
+		return err
+	}
+	if metadata.FinaleFromTrakt(e.Item.EpisodeType).CompletesSeason() {
+		batch.CompletedSeasonIDs = []int64{seasonID}
+	} else if inventoryComplete(e.Item) {
+		batch.CompletedSeasonIDs = []int64{seasonID}
+	} else if caughtUp(e.Item) {
+		batch.NewEpisodeIDs = []int64{mediaID}
+		batch.Seasons = []prompts.SeasonState{{SeasonID: seasonID, ShowID: showID, InventoryKnown: true, Episodes: []prompts.Episode{
+			{ID: mediaID, Number: *e.Item.EpisodeNumber, Released: true, Watched: true, Normal: true},
+			{ID: -1, Number: *e.Item.EpisodeNumber + 1, Released: false, Normal: true},
+		}}}
+	}
+	_, err := prompts.NewService(s.db).Apply(ctx, batch)
+	return err
+}
+
+func inventoryComplete(item Item) bool {
+	return item.SeasonEpisodeCount != nil && item.SeasonWatchedEpisodeCount != nil && item.SeasonFutureEpisodeCount != nil && *item.SeasonEpisodeCount > 0 && *item.SeasonWatchedEpisodeCount == *item.SeasonEpisodeCount && *item.SeasonFutureEpisodeCount == 0
+}
+
+func caughtUp(item Item) bool {
+	return item.SeasonEpisodeCount != nil && item.SeasonWatchedEpisodeCount != nil && item.SeasonFutureEpisodeCount != nil && item.LatestReleasedEpisodeNumber != nil && item.EpisodeNumber != nil && *item.SeasonEpisodeCount > 0 && *item.SeasonWatchedEpisodeCount == *item.SeasonEpisodeCount && *item.SeasonFutureEpisodeCount > 0 && *item.EpisodeNumber == *item.LatestReleasedEpisodeNumber
 }
 func (s *Service) RecordAuthFailure(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE jellyfin_ingest_status SET auth_failure_count=auth_failure_count+1,last_auth_failure_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton=1`)
@@ -188,13 +244,28 @@ func validate(e Event) error {
 	if e.Item.Year != nil && (*e.Item.Year < 1888 || *e.Item.Year > 3000) {
 		return fmt.Errorf("%w: invalid_number", ErrInvalidEvent)
 	}
-	if e.Item.Type == "episode" && (trim(e.Item.SeriesTitle) == "" || e.Item.SeasonNumber == nil || e.Item.EpisodeNumber == nil || *e.Item.SeasonNumber < 0 || *e.Item.EpisodeNumber < 0) {
+	if e.Item.Type == "episode" && (trim(e.Item.SeriesTitle) == "" || e.Item.SeasonNumber == nil || e.Item.EpisodeNumber == nil || *e.Item.SeasonNumber < 0 || *e.Item.EpisodeNumber < 0 || !hasStableIdentity(e.Item.SeriesID, e.Item.SeriesProviderIDs) || !hasStableIdentity(e.Item.SeasonID, e.Item.SeasonProviderIDs)) {
 		return fmt.Errorf("%w: invalid_episode", ErrInvalidEvent)
+	}
+	if invalidCount(e.Item.SeasonEpisodeCount) || invalidCount(e.Item.SeasonWatchedEpisodeCount) || invalidCount(e.Item.SeasonFutureEpisodeCount) || (e.Item.SeasonEpisodeCount != nil && e.Item.SeasonWatchedEpisodeCount != nil && *e.Item.SeasonWatchedEpisodeCount > *e.Item.SeasonEpisodeCount) {
+		return fmt.Errorf("%w: invalid_inventory", ErrInvalidEvent)
 	}
 	if e.Playback.PositionTicks != nil && *e.Playback.PositionTicks < 0 || e.Playback.RuntimeTicks != nil && *e.Playback.RuntimeTicks < 0 || e.Playback.ProgressPercent != nil && (*e.Playback.ProgressPercent < 0 || *e.Playback.ProgressPercent > 100) || e.Playback.PlayCount != nil && *e.Playback.PlayCount < 0 {
 		return fmt.Errorf("%w: invalid_number", ErrInvalidEvent)
 	}
 	return nil
+}
+func invalidCount(value *int) bool { return value != nil && *value < 0 }
+func hasStableIdentity(jellyfinID string, providerIDs map[string]string) bool {
+	if trim(jellyfinID) != "" {
+		return true
+	}
+	for _, provider := range []string{"tmdb", "tvdb", "imdb"} {
+		if trim(providerIDs[provider]) != "" {
+			return true
+		}
+	}
+	return false
 }
 func rejectionCode(err error) string {
 	parts := strings.Split(err.Error(), ": ")
@@ -234,7 +305,7 @@ func ensureMedia(ctx context.Context, tx *sql.Tx, e Event) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	seasonID, err := ensureSeason(ctx, tx, showID, *e.Item.SeasonNumber)
+	seasonID, err := ensureSeason(ctx, tx, e, showID, *e.Item.SeasonNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -255,25 +326,41 @@ func ensureMedia(ctx context.Context, tx *sql.Tx, e Event) (int64, error) {
 func ensureShow(ctx context.Context, tx *sql.Tx, e Event) (int64, error) {
 	ids := e.Item.SeriesProviderIDs
 	if id, ok, err := findPreferred(ctx, tx, ids); err != nil || ok {
+		if err == nil && trim(e.Item.SeriesID) != "" {
+			err = attachIDs(ctx, tx, id, "jellyfin:"+trim(e.Server.ID), e.Item.SeriesID, ids)
+		}
 		return id, err
 	}
-	showKey := "series:" + trim(e.Item.ID)
 	jp := "jellyfin:" + trim(e.Server.ID)
-	if id, ok, err := findExternal(ctx, tx, jp, showKey); err != nil || ok {
+	if id, ok, err := findExternal(ctx, tx, jp, e.Item.SeriesID); err != nil || ok {
 		return id, err
 	}
 	id, err := insertMedia(ctx, tx, "show", e.Item.SeriesTitle, nil, nil, nil, nil)
 	if err != nil {
 		return 0, err
 	}
-	return id, attachIDs(ctx, tx, id, jp, showKey, ids)
+	return id, attachIDs(ctx, tx, id, jp, e.Item.SeriesID, ids)
 }
-func ensureSeason(ctx context.Context, tx *sql.Tx, showID int64, n int) (int64, error) {
+func ensureSeason(ctx context.Context, tx *sql.Tx, e Event, showID int64, n int) (int64, error) {
+	jp := "jellyfin:" + trim(e.Server.ID)
+	if id, ok, err := findExternal(ctx, tx, jp, e.Item.SeasonID); err != nil || ok {
+		return id, err
+	}
+	if id, ok, err := findPreferred(ctx, tx, e.Item.SeasonProviderIDs); err != nil || ok {
+		if err == nil && trim(e.Item.SeasonID) != "" {
+			err = attachIDs(ctx, tx, id, jp, e.Item.SeasonID, e.Item.SeasonProviderIDs)
+		}
+		return id, err
+	}
 	var id int64
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM media_items WHERE media_type='season' AND parent_id=? AND season_number=?`, showID, n).Scan(&id); err == nil {
-		return id, nil
+		return id, attachIDs(ctx, tx, id, jp, e.Item.SeasonID, e.Item.SeasonProviderIDs)
 	}
-	return insertMedia(ctx, tx, "season", "Season "+strconv.Itoa(n), nil, &showID, &n, nil)
+	id, err := insertMedia(ctx, tx, "season", "Season "+strconv.Itoa(n), nil, &showID, &n, nil)
+	if err != nil {
+		return 0, err
+	}
+	return id, attachIDs(ctx, tx, id, jp, e.Item.SeasonID, e.Item.SeasonProviderIDs)
 }
 func insertMedia(ctx context.Context, tx *sql.Tx, kind, title string, year *int, parent *int64, season, episode *int) (int64, error) {
 	r, err := tx.ExecContext(ctx, `INSERT INTO media_items(media_type,title,year,parent_id,season_number,episode_number) VALUES(?,?,?,?,?,?)`, kind, trim(title), year, parent, season, episode)
@@ -303,7 +390,10 @@ func findExternal(ctx context.Context, tx *sql.Tx, p, x string) (int64, bool, er
 	return id, err == nil, err
 }
 func attachIDs(ctx context.Context, tx *sql.Tx, id int64, jp, jid string, ids map[string]string) error {
-	pairs := map[string]string{jp: jid}
+	pairs := map[string]string{}
+	if trim(jp) != "" && trim(jid) != "" {
+		pairs[jp] = trim(jid)
+	}
 	for p, x := range ids {
 		p = strings.ToLower(trim(p))
 		if (p == "tmdb" || p == "imdb" || p == "tvdb") && trim(x) != "" {
@@ -316,26 +406,4 @@ func attachIDs(ctx context.Context, tx *sql.Tx, id int64, jp, jid string, ids ma
 		}
 	}
 	return nil
-}
-func createPrompt(ctx context.Context, tx *sql.Tx, mediaID, watchID int64, itemType string) error {
-	key := "prompt_movies_enabled"
-	if itemType == "episode" {
-		key = "prompt_tv_enabled"
-	}
-	enabled := "true"
-	if err := tx.QueryRowContext(ctx, `SELECT setting_value FROM app_settings WHERE setting_key=?`, key).Scan(&enabled); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if enabled != "true" {
-		return nil
-	}
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND task_type='rating' AND state IN ('pending','snoozed')`, mediaID).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO prompt_tasks(media_id,watch_event_id,task_type,state) VALUES(?,?,'rating','pending')`, mediaID, watchID)
-	return err
 }

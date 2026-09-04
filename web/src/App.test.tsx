@@ -18,6 +18,7 @@ const integrations = {
   letterboxd: { enabled: true, status: "available" },
   serializd: { enabled: true, status: "enabled" },
   discord: { enabled: false, status: "disabled" },
+	jellyfin: { configured: false, protocol_version: 1, accepted_count: 0, auth_failure_count: 0 },
 };
 let currentIntegrations = integrations;
 const settings = {
@@ -43,7 +44,7 @@ const task: Task = {
     external_ids: { trakt: "9" },
   },
 };
-let activeTask = task;
+let activeTask: Task | undefined = task;
 function json(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -67,9 +68,9 @@ beforeEach(() => {
         return json({
           page: 1,
           per_page: 50,
-          total: 1,
-          total_pages: 1,
-          items: [activeTask],
+          total: activeTask ? 1 : 0,
+          total_pages: activeTask ? 1 : 0,
+          items: activeTask ? [activeTask] : [],
         });
       if (path.startsWith("/api/history"))
         return json({ page: 1, per_page: 20, total: 1, total_pages: 1, items: [{ id: 1, source: "trakt", watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: task.media }] });
@@ -123,6 +124,8 @@ beforeEach(() => {
         });
       if (path === "/api/integrations/trakt/sync" && init?.method === "POST")
         return json({ running: false });
+		if (path === "/api/integrations/jellyfin" && init?.method === "POST")
+			return json({ configured: true, protocol_version: 1, token: "one-time-jellyfin-token" }, 201);
       if (path === "/api/status")
         return json({
           overall: "needs_attention",
@@ -316,6 +319,14 @@ describe("WatchWeaver dashboard", () => {
       ),
     );
   });
+	it("generates a one-time Jellyfin plugin token from settings", async () => {
+		render(<App />);
+		await screen.findByText("The Example");
+		fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+		fireEvent.click(await screen.findByRole("button", { name: "Generate token" }));
+		expect(await screen.findByText("one-time-jellyfin-token")).toBeInTheDocument();
+		await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/integrations/jellyfin", expect.objectContaining({ method: "POST" })));
+	});
   it("manages Discord configuration from settings", async () => {
     render(<App />);
     await screen.findByText("The Example");
@@ -359,6 +370,17 @@ describe("WatchWeaver dashboard", () => {
     expect(
       screen.getByRole("link", { name: "Download diagnostics" }),
     ).toHaveAttribute("href", "/api/diagnostics");
+  });
+  it("shows Jellyfin as the ready history source and uses source-neutral inbox copy", async () => {
+    currentIntegrations = {
+      ...integrations,
+      trakt: { ...integrations.trakt, authorization: { status: "not_configured" } },
+      jellyfin: { ...integrations.jellyfin, configured: true },
+    };
+    activeTask = undefined;
+    render(<App />);
+    expect(await screen.findByText("Jellyfin · Ready")).toBeInTheDocument();
+    expect(await screen.findByText(/after watch activity is processed/)).toBeInTheDocument();
   });
   it("shows scheduled polling and refreshes the inbox when it completes", async () => {
     let inboxCalls = 0;

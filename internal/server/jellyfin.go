@@ -72,11 +72,6 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	if r.Method == http.MethodHead {
-		w.Header().Set("X-WatchWeaver-Protocol-Version", "1")
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if a.credentials == nil {
 		writeError(w, http.StatusServiceUnavailable, "Jellyfin ingestion is unavailable")
 		return
@@ -91,6 +86,11 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 	if expected == "" || provided == "" || !secureEqual(expected, provided) {
 		svc.RecordAuthFailure(r.Context())
 		writeError(w, http.StatusUnauthorized, "invalid Jellyfin ingestion token")
+		return
+	}
+	if r.Method == http.MethodHead {
+		w.Header().Set("X-WatchWeaver-Protocol-Version", "1")
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	var event jellyfin.Event

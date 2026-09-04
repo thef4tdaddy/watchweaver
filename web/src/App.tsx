@@ -52,6 +52,12 @@ function App() {
     const timer = window.setInterval(() => void refreshIntegrations(), 3000);
     return () => window.clearInterval(timer);
   }, [refreshIntegrations]);
+  const traktConnected = integrations?.trakt.authorization.status === "connected";
+  const historySourceLabel = traktConnected
+    ? "Trakt · Connected"
+    : integrations?.jellyfin?.configured
+      ? "Jellyfin · Ready"
+      : "History source · Not configured";
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -79,8 +85,8 @@ function App() {
         </nav>
         <div className="sidebar-foot">
           <StatusDot
-            ok={integrations?.trakt.authorization.status === "connected"}
-            label={`Trakt · ${humanStatus(integrations?.trakt.authorization.status)}`}
+            ok={traktConnected || integrations?.jellyfin?.configured === true}
+            label={historySourceLabel}
           />
           <small className="version-label">Version {updateStatus?.running_version || buildVersion}</small>
           <StatusDot
@@ -305,6 +311,19 @@ function mediaLabel(media: Task["media"]) {
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 
+async function copyToClipboard(value: string) {
+	if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+	const field = document.createElement("textarea");
+	field.value = value;
+	field.style.position = "fixed";
+	field.style.opacity = "0";
+	document.body.appendChild(field);
+	field.select();
+	const copied = document.execCommand("copy");
+	field.remove();
+	if (!copied) throw new Error("Copy is unavailable. Select and copy the token manually.");
+}
+
 function StarRating({ value, onChange, label, emptyLabel = "Choose rating" }: { value?: number; onChange: (value: number) => void; label: string; emptyLabel?: string }) {
   const [preview, setPreview] = useState<number>();
   const [dragging, setDragging] = useState(false);
@@ -446,7 +465,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }
       ) : page.items.length === 0 && !syncActive ? (
         <Empty
           title="No rating prompts waiting"
-          body="Eligible movie, season, and episode ratings will appear here after Trakt activity is processed. Optional reviews can always be added from History."
+          body="Eligible movie, season, and episode ratings will appear here after watch activity is processed. Optional reviews can always be added from History."
         />
       ) : (
         <div className="task-list">
@@ -951,6 +970,7 @@ function SettingsView({
   const [discordEnabled, setDiscordEnabled] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationMessage, setIntegrationMessage] = useState("");
+	const [jellyfinToken, setJellyfinToken] = useState("");
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -1004,6 +1024,18 @@ function SettingsView({
       await request("/api/integrations/discord/test", { method: "POST" });
       return "Test announcement sent.";
     });
+	const generateJellyfinToken = () =>
+		runIntegrationAction(async () => {
+			const result = await request<{ token: string }>("/api/integrations/jellyfin", { method: "POST" });
+			setJellyfinToken(result.token);
+			return "Jellyfin token generated. Copy it now; it will not be shown again.";
+		});
+	const revokeJellyfinToken = () =>
+		runIntegrationAction(async () => {
+			await request("/api/integrations/jellyfin", { method: "DELETE" });
+			setJellyfinToken("");
+			return "Jellyfin connection token revoked.";
+		});
   const save = async () => {
     if (!settings) return;
     try {
@@ -1071,10 +1103,31 @@ function SettingsView({
           {integrationMessage}
         </p>
       )}
+		<div className="settings-card">
+			<div className="card-heading">
+				<div><p className="eyebrow">AUTOMATED SOURCE</p><h2>Jellyfin</h2></div>
+				<span className={`state ${setup.jellyfin?.configured ? "confirmed" : "pending"}`}>{setup.jellyfin?.configured ? "Ready" : "Not configured"}</span>
+			</div>
+			<p>Connect the WatchWeaver Jellyfin plugin with a dedicated, write-only token. Jellyfin can be your only history source or work alongside Trakt.</p>
+			<div className="connection-info">
+				{integrations.jellyfin?.last_accepted_at ? <>
+					<StatusDot ok label="Events received" />
+					<p>Last event: {formatDate(integrations.jellyfin.last_accepted_at)}</p>
+					<p>Jellyfin {integrations.jellyfin.last_server_version || "unknown"} · plugin {integrations.jellyfin.last_plugin_version || "unknown"}</p>
+				</> : <StatusDot ok={Boolean(setup.jellyfin?.configured)} label={setup.jellyfin?.configured ? "Waiting for the first event" : "Generate a token to connect"} />}
+				{integrations.jellyfin?.last_rejection_code && <small className="warning">Latest rejected delivery: {integrations.jellyfin.last_rejection_code}</small>}
+			</div>
+			<div className="settings-actions">
+				<button className="primary" disabled={integrationBusy} onClick={() => void generateJellyfinToken()}>{setup.jellyfin?.configured ? "Rotate token" : "Generate token"}</button>
+				{setup.jellyfin?.configured && <button className="secondary" disabled={integrationBusy} onClick={() => void revokeJellyfinToken()}>Revoke token</button>}
+			</div>
+			{jellyfinToken && <div className="auth-code jellyfin-token"><p>Paste this token into the Jellyfin plugin now:</p><strong>{jellyfinToken}</strong><button className="secondary" onClick={() => void copyToClipboard(jellyfinToken).then(() => setIntegrationMessage("Jellyfin token copied.")).catch((error) => onError(error.message))}>Copy token</button></div>}
+			<div className="override-note">This receiver is intended for private LAN/VPN use. The token is encrypted at rest and never returned after this screen is dismissed.</div>
+		</div>
       <div className="settings-card">
         <div className="card-heading">
           <div>
-            <p className="eyebrow">REQUIRED SOURCE</p>
+			<p className="eyebrow">OPTIONAL SOURCE</p>
             <h2>Trakt</h2>
           </div>
           <span

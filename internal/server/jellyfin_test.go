@@ -49,6 +49,8 @@ func ingestRequest(f *apiFixture, token, key, body string) *httptest.ResponseRec
 
 func TestJellyfinTokenLifecycleAndDurableIdempotency(t *testing.T) {
 	f, token := jellyfinFixture(t)
+	var promptsBefore int
+	_ = f.db.QueryRow(`SELECT COUNT(*) FROM prompt_tasks`).Scan(&promptsBefore)
 	rr := ingestRequest(f, token, "event-1", validJellyfinEvent)
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("accept: %d %s", rr.Code, rr.Body.String())
@@ -59,9 +61,9 @@ func TestJellyfinTokenLifecycleAndDurableIdempotency(t *testing.T) {
 	}
 	var watches, prompts int
 	_ = f.db.QueryRow(`SELECT COUNT(*) FROM watch_events WHERE source='jellyfin'`).Scan(&watches)
-	_ = f.db.QueryRow(`SELECT COUNT(*) FROM prompt_tasks WHERE watch_event_id IS NOT NULL`).Scan(&prompts)
-	if watches != 1 || prompts != 1 {
-		t.Fatalf("watches=%d prompts=%d", watches, prompts)
+	_ = f.db.QueryRow(`SELECT COUNT(*) FROM prompt_tasks`).Scan(&prompts)
+	if watches != 1 || prompts != promptsBefore+1 {
+		t.Fatalf("watches=%d prompts=%d before=%d", watches, prompts, promptsBefore)
 	}
 	rot := f.request(http.MethodPost, "/api/integrations/jellyfin", "")
 	var next struct {
@@ -109,6 +111,17 @@ func TestJellyfinCompletesSetupWithoutTraktAndRedactsToken(t *testing.T) {
 	}
 }
 
+func TestOperationalStatusTreatsTraktAsOptionalWithJellyfin(t *testing.T) {
+	f, _ := jellyfinFixture(t)
+	rr := f.request(http.MethodGet, "/api/status", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"trakt":{"state":"disabled"`) {
+		t.Fatalf("expected optional Trakt to be disabled, body=%s", rr.Body.String())
+	}
+}
+
 func TestJellyfinAuthenticatedConnectionProbe(t *testing.T) {
 	f, token := jellyfinFixture(t)
 	rr := httptest.NewRecorder()
@@ -117,5 +130,32 @@ func TestJellyfinAuthenticatedConnectionProbe(t *testing.T) {
 	f.handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent || rr.Header().Get("X-WatchWeaver-Protocol-Version") != "1" {
 		t.Fatalf("probe: %d %#v", rr.Code, rr.Header())
+	}
+}
+
+func TestJellyfinConnectionProbeRejectsInvalidRotatedAndRevokedTokens(t *testing.T) {
+	f, token := jellyfinFixture(t)
+	probe := func(value string) int {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, "/api/v1/ingest/jellyfin/events", nil)
+		if value != "" {
+			req.Header.Set("Authorization", "Bearer "+value)
+		}
+		f.handler.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if probe("") != http.StatusUnauthorized || probe("wrong") != http.StatusUnauthorized || probe(token) != http.StatusNoContent {
+		t.Fatal("initial probe authentication failed")
+	}
+	rotated := f.request(http.MethodPost, "/api/integrations/jellyfin", "")
+	var next struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(rotated.Body.Bytes(), &next)
+	if probe(token) != http.StatusUnauthorized || probe(next.Token) != http.StatusNoContent {
+		t.Fatal("rotated probe authentication failed")
+	}
+	if f.request(http.MethodDelete, "/api/integrations/jellyfin", "").Code != http.StatusNoContent || probe(next.Token) != http.StatusUnauthorized {
+		t.Fatal("revoked probe authentication failed")
 	}
 }

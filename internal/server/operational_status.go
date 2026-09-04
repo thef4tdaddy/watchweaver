@@ -94,9 +94,16 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 	if a.trakt != nil {
 		auth = a.trakt.Status(ctx)
 	}
+	jellyfinConfigured := false
+	if a.credentials != nil {
+		jellyfinConfigured, _ = a.credentials.Configured(ctx, "jellyfin", jellyfinTokenKey)
+	}
 	traktState, traktDetail, traktAction := "working", "Connected and ready to synchronize.", "sync"
 	if auth.Status != trakt.StatusConnected {
-		traktState, traktDetail, traktAction = "needs_attention", "Trakt needs to be configured or reconnected.", "configure"
+		traktState, traktDetail, traktAction = "needs_attention", "Configure Trakt or Jellyfin to receive watch activity.", "configure"
+		if jellyfinConfigured {
+			traktState, traktDetail = "disabled", "Optional Trakt synchronization is not configured."
+		}
 	}
 	if a.traktSync != nil {
 		syncStatus, err := a.traktSync.Status(ctx)
@@ -110,10 +117,6 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		}
 	}
 	result.Components["trakt"] = operationalComponent{State: traktState, Label: "Trakt", Detail: traktDetail, Action: traktAction}
-	jellyfinConfigured := false
-	if a.credentials != nil {
-		jellyfinConfigured, _ = a.credentials.Configured(ctx, "jellyfin", jellyfinTokenKey)
-	}
 	jellyfinStatus, err := a.jellyfinService().Status(ctx, jellyfinConfigured)
 	if err != nil {
 		return result, err

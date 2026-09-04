@@ -6,6 +6,19 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 const json=(body:unknown,status=200)=>Promise.resolve(new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}}))
 
 describe('first-run setup',()=>{
+	it('can complete first-run setup with Jellyfin only',async()=>{
+		let configured=false
+		const fetchMock=vi.fn((input:RequestInfo|URL,init?:RequestInit)=>{const path=String(input)
+			if(path==='/api/setup')return json({complete:configured,encrypted_storage:true,trakt:{configured:false,authorization_status:'not_configured',client_id_overridden:false,client_secret_overridden:false},discord:{configured:false,enabled:false,webhook_overridden:false},jellyfin:{configured,protocol_version:1}})
+			if(path==='/api/integrations/jellyfin'&&init?.method==='POST'){configured=true;return json({configured:true,protocol_version:1,token:'one-time-token'},201)}
+			if(path==='/api/integrations')return json({trakt:{authorization:{status:'not_configured'},poll:{consecutive_failures:0},sync:{running:false,can_sync:false,retry_allowed:false}},jellyfin:{configured:true,protocol_version:1,accepted_count:0,auth_failure_count:0},letterboxd:{enabled:true,status:'available'},serializd:{enabled:false,status:'disabled'},discord:{enabled:false,status:'disabled'}})
+			if(path==='/api/inbox')return json({page:1,per_page:50,total:0,total_pages:0,items:[]})
+			return json({error:'not found'},404)
+		})
+		vi.stubGlobal('fetch',fetchMock);render(<SetupGate/>);await screen.findByText('Set up WatchWeaver')
+		fireEvent.click(screen.getByRole('button',{name:'Generate token'}));expect(await screen.findByText('one-time-token')).toBeInTheDocument()
+		fireEvent.click(screen.getByRole('button',{name:'Finish setup'}));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'WatchWeaver setup'})).not.toBeInTheDocument())
+	})
   it('does not show onboarding controls after setup is complete',async()=>{
     vi.stubGlobal('fetch',vi.fn((input:RequestInfo|URL)=>String(input)==='/api/setup'?json({complete:true,encrypted_storage:true,trakt:{configured:true,authorization_status:'connected',client_id_overridden:false,client_secret_overridden:false},discord:{configured:false,enabled:false,webhook_overridden:false}}):json({error:'not found'},404)))
     render(<SetupGate/>);await waitFor(()=>expect(screen.queryByText('Starting WatchWeaver…')).not.toBeInTheDocument())

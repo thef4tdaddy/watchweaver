@@ -28,3 +28,4 @@ CREATE TABLE jellyfin_ingest_status (
 );
 
 INSERT INTO jellyfin_ingest_status(singleton) VALUES(1);
+

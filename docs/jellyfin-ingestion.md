@@ -60,6 +60,8 @@ The body also contains the event ID so queued events remain self-contained.
     "title": "Episode title",
     "year": 2026,
     "series_title": "Series title",
+    "series_id": "stable-jellyfin-series-id",
+    "season_id": "stable-jellyfin-season-id",
     "season_number": 2,
     "episode_number": 4,
     "provider_ids": {
@@ -152,7 +154,7 @@ For movies, prefer existing external-ID mappings in this order when available:
 2. IMDb
 3. TVDb
 
-For episodes, map the show using provider IDs where available, then resolve/create the season and episode by the supplied season/episode numbers. Episode-specific provider IDs may additionally be stored.
+For episodes, `series_id` and `season_id` identify Jellyfin's explicit hierarchy; `series_provider_ids` and `season_provider_ids` may provide portable identities. At least one stable Jellyfin or provider identity is required at each level. Map the show using provider IDs where available, then resolve/create the season and episode by the supplied identities and numbers. Never derive a series identity from the episode item ID. Episode-specific provider IDs may additionally be stored.
 
 Jellyfin item IDs are stored as source-specific external mappings but are not globally authoritative because libraries and servers can be rebuilt.
 
