@@ -338,9 +338,61 @@ func (s *RatingSync) outboundIdentity(ctx context.Context, mediaID int64) (strin
 	}
 	var traktID string
 	if err := s.db.QueryRowContext(ctx, `SELECT external_id FROM external_ids WHERE media_id=? AND provider='trakt'`, mediaID).Scan(&traktID); err != nil {
+		if err == sql.ErrNoRows && mediaType == "season" {
+			traktID, err = s.resolveSeasonIdentity(ctx, mediaID)
+			if err == nil {
+				return mediaType, traktID, nil
+			}
+		}
 		return "", "", fmt.Errorf("rating target missing Trakt id: %w", err)
 	}
 	return mediaType, traktID, nil
+}
+
+func (s *RatingSync) resolveSeasonIdentity(ctx context.Context, mediaID int64) (string, error) {
+	var showTraktID string
+	var seasonNumber int
+	err := s.db.QueryRowContext(ctx, `SELECT x.external_id,s.season_number FROM media_items s JOIN external_ids x ON x.media_id=s.parent_id AND x.provider='trakt' WHERE s.id=? AND s.media_type='season'`, mediaID).Scan(&showTraktID, &seasonNumber)
+	if err != nil {
+		return "", err
+	}
+	req, err := s.request(ctx, http.MethodGet, "/shows/"+showTraktID+"/seasons?extended=full", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch Trakt seasons: %w", err)
+	}
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxRatingResponseBytes+1))
+	resp.Body.Close()
+	if readErr != nil {
+		return "", readErr
+	}
+	if len(body) > maxRatingResponseBytes {
+		return "", fmt.Errorf("fetch Trakt seasons: response too large")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch Trakt seasons: HTTP %d", resp.StatusCode)
+	}
+	var seasons []seasonObject
+	if err := json.Unmarshal(body, &seasons); err != nil {
+		return "", fmt.Errorf("decode Trakt seasons: %w", err)
+	}
+	for _, season := range seasons {
+		if season.Number != seasonNumber {
+			continue
+		}
+		traktID, ok := stringID(season.IDs["trakt"])
+		if !ok {
+			break
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,'trakt',?) ON CONFLICT(media_id,provider) DO UPDATE SET external_id=excluded.external_id`, mediaID, traktID); err != nil {
+			return "", err
+		}
+		return traktID, nil
+	}
+	return "", sql.ErrNoRows
 }
 
 func (s *RatingSync) recordFailure(ctx context.Context, mediaID int64, attempt int, message string, retryAfter int) error {
