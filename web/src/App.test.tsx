@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import type { Task } from "./api";
 
 const integrations = {
   trakt: {
@@ -27,7 +28,7 @@ const settings = {
   serializd_reminder_changes: 20,
   serializd_reminder_days: 14,
 };
-const task = {
+const task: Task = {
   id: 4,
   type: "rating_review",
   state: "pending",
@@ -40,6 +41,7 @@ const task = {
     external_ids: { trakt: "9" },
   },
 };
+let activeTask = task;
 function json(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -50,6 +52,7 @@ function json(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  activeTask = task;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -61,7 +64,7 @@ beforeEach(() => {
           per_page: 50,
           total: 1,
           total_pages: 1,
-          items: [task],
+          items: [activeTask],
         });
       if (path.startsWith("/api/history"))
         return json({ page: 1, per_page: 20, total: 1, total_pages: 1, items: [{ id: 1, source: "trakt", watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: task.media }] });
@@ -212,6 +215,35 @@ describe("WatchWeaver dashboard", () => {
         "/api/tasks/4/complete",
         expect.objectContaining({
           method: "POST",
+          body: JSON.stringify({ rating: 9 }),
+        }),
+      ),
+    );
+  });
+  it("keeps episode prompts rating-only while directing reviews to History", async () => {
+    activeTask = {
+      ...task,
+      id: 5,
+      media: {
+        ...task.media,
+        id: 10,
+        type: "episode",
+        title: "A Standout Episode",
+        show_title: "Example Show",
+        season_number: 1,
+        episode_number: 4,
+      },
+    };
+    render(<App />);
+    await screen.findByText("A Standout Episode");
+    expect(screen.queryByLabelText("Review for A Standout Episode")).not.toBeInTheDocument();
+    expect(screen.getByText(/Add an optional episode review from History/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("4.5 stars"));
+    fireEvent.click(screen.getByRole("button", { name: "Save & complete" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/tasks/5/complete",
+        expect.objectContaining({
           body: JSON.stringify({ rating: 9 }),
         }),
       ),

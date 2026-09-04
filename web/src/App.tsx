@@ -368,8 +368,8 @@ function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) =
       {syncRunning && <SyncProgress phase={syncPhase} />}
       {page.items.length === 0 && !syncRunning ? (
         <Empty
-          title="You’re all caught up"
-          body="New rating and review prompts will appear here after Trakt activity is processed."
+          title="No rating prompts waiting"
+          body="Eligible movie, season, and episode ratings will appear here after Trakt activity is processed. Optional reviews can always be added from History."
         />
       ) : (
         <div className="task-list">
@@ -422,17 +422,26 @@ function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) =
                         : "Choose rating"}
                     </b>
                   </div>
-                  <textarea
-                    value={draft.review}
-                    onChange={(e) =>
-                      setDrafts((d) => ({
-                        ...d,
-                        [task.id]: { ...draft, review: e.target.value },
-                      }))
-                    }
-                    placeholder="Add an optional review…"
-                    aria-label={`Review for ${task.media.title}`}
-                  />
+                  {task.media.type !== "episode" && (
+                    <textarea
+                      value={draft.review}
+                      onChange={(e) =>
+                        setDrafts((d) => ({
+                          ...d,
+                          [task.id]: { ...draft, review: e.target.value },
+                        }))
+                      }
+                      placeholder="Add an optional review…"
+                      aria-label={`Review for ${task.media.title}`}
+                    />
+                  )}
+                  {task.media.type === "episode" && (
+                    <p className="destination-note">
+                      This prompt is for the episode rating only. Add an
+                      optional episode review from History whenever an episode
+                      stands out.
+                    </p>
+                  )}
                   <div className="actions">
                     <button
                       className="primary"
@@ -443,7 +452,7 @@ function Inbox({ onError, syncRunning, syncPhase }: { onError: (value: string) =
                       onClick={() =>
                         void act(task.id, "complete", {
                           ...(draft.rating ? { rating: draft.rating } : {}),
-                          ...(draft.review.trim()
+                          ...(task.media.type !== "episode" && draft.review.trim()
                             ? { review: draft.review }
                             : {}),
                         })
