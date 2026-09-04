@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import "./App.css";
 import TraktAccessNote from "./TraktAccessNote";
 import NetworkBoundaryNote from "./NetworkBoundaryNote";
@@ -29,7 +29,6 @@ const nav: [View, string, string][] = [
   ["status", "Status", "status"],
   ["settings", "Settings", "settings"],
 ];
-const stars = Array.from({ length: 10 }, (_, i) => i + 1);
 const buildVersion = import.meta.env.VITE_APP_VERSION || "dev";
 
 function App() {
@@ -306,6 +305,61 @@ function mediaLabel(media: Task["media"]) {
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 
+function StarRating({ value, onChange, label, emptyLabel = "Choose rating" }: { value?: number; onChange: (value: number) => void; label: string; emptyLabel?: string }) {
+  const [preview, setPreview] = useState<number>();
+  const [dragging, setDragging] = useState(false);
+  const shown = preview ?? value ?? 0;
+  const ratingAtPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return Math.max(1, Math.min(10, Math.ceil(((event.clientX - bounds.left) / bounds.width) * 10)));
+  };
+  return <div className="rating-row" aria-label={label} onMouseLeave={() => setPreview(undefined)}>
+    <div
+      className="star-picker"
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setDragging(true);
+        const rating = ratingAtPointer(event);
+        setPreview(rating);
+        onChange(rating);
+      }}
+      onPointerMove={(event) => {
+        if (!dragging) return;
+        const rating = ratingAtPointer(event);
+        setPreview(rating);
+        onChange(rating);
+      }}
+      onPointerUp={(event) => {
+        setDragging(false);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onPointerCancel={() => setDragging(false)}
+    >
+      {[1, 2, 3, 4, 5].map((star) => {
+        const half = star * 2 - 1;
+        const full = star * 2;
+        const fill = shown >= full ? "full" : shown >= half ? "half" : "empty";
+        return <span className={`rating-star ${fill}`} key={star}>
+          <span className="star-base" aria-hidden="true">★</span>
+          <span className="star-fill" aria-hidden="true">★</span>
+          {[half, full].map((rating) => <button
+            type="button"
+            className={`star-hit ${rating === half ? "left" : "right"}`}
+            key={rating}
+            title={`${rating / 2} stars`}
+            aria-label={`${rating / 2} stars`}
+            onMouseEnter={() => setPreview(rating)}
+            onFocus={() => setPreview(rating)}
+            onBlur={() => setPreview(undefined)}
+            onClick={() => onChange(rating)}
+          />)}
+        </span>;
+      })}
+    </div>
+    <b>{shown ? `${shown / 2} / 5` : emptyLabel}</b>
+  </div>;
+}
+
 function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean }) {
   const [page, setPage] = useState<Page<Task>>();
   const [ratings, setRatings] = useState<Record<number, number>>({});
@@ -420,31 +474,14 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }
                       a historical snapshot.
                     </div>
                   )}
-                  <div
-                    className="rating-row"
-                    aria-label={`Rating for ${task.media.title}`}
-                  >
-                    {stars.map((value) => (
-                      <button
-                        key={value}
-                        title={`${value / 2} stars`}
-                        className={(draft.rating || 0) >= value ? "filled" : ""}
-                        onClick={() =>
-                          setDrafts((d) => ({
-                            ...d,
-                            [task.id]: { ...draft, rating: value },
-                          }))
-                        }
-                      >
-                        {value % 2 === 0 ? "★" : "◐"}
-                      </button>
-                    ))}
-                    <b>
-                      {draft.rating
-                        ? `${draft.rating / 2} / 5`
-                        : "Choose rating"}
-                    </b>
-                  </div>
+                  <StarRating
+                    label={`Rating for ${task.media.title}`}
+                    value={draft.rating}
+                    onChange={(rating) => setDrafts((d) => ({
+                      ...d,
+                      [task.id]: { ...draft, rating },
+                    }))}
+                  />
                   {task.media.type !== "episode" && (
                     <textarea
                       value={draft.review}
@@ -622,7 +659,7 @@ function HistoryEditor({ item, onError }: { item: HistoryItem; onError: (v: stri
   return <div className="history-editor">
     {targets.length > 1 && <div className="target-tabs">{targets.map((value) => <button key={value.id} className={target.id === value.id ? "active" : ""} onClick={() => setTarget(value)}>{value.label}</button>)}</div>}
     {busy ? <Loading /> : <>
-      <div className="rating-row" aria-label={`Rating for ${target.label}`}>{stars.map((value) => <button key={value} title={`${value / 2} stars`} className={(rating || 0) >= value ? "filled" : ""} onClick={() => setRating(value)}>{value % 2 === 0 ? "★" : "◐"}</button>)}<b>{rating ? `${rating / 2} / 5` : "Not rated"}</b></div>
+      <StarRating label={`Rating for ${target.label}`} value={rating} onChange={setRating} emptyLabel="Not rated" />
       {rating !== undefined && <button className="text-button" onClick={() => setRating(undefined)}>Clear rating</button>}
       <textarea value={review} onChange={(e) => setReview(e.target.value)} placeholder="Add an optional review…" aria-label={`Review for ${target.label}`} />
       <p className="destination-note">{destination}</p>
