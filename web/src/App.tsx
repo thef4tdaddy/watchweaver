@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import TraktAccessNote from "./TraktAccessNote";
+import NetworkBoundaryNote from "./NetworkBoundaryNote";
 import {
   APIError,
   type Batch,
@@ -202,6 +203,7 @@ function StatusView({
           Refresh status
         </button>
       </div>
+      <NetworkBoundaryNote />
       <div className="settings-grid">
         {entries.map(([name, component]) => (
           <article className="settings-card" key={name}>

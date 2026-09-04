@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import App from "./App";
 import { request } from "./api";
 import TraktAccessNote from "./TraktAccessNote";
+import NetworkBoundaryNote from "./NetworkBoundaryNote";
 import "./setup.css";
 
 type Setup = {
@@ -224,7 +225,7 @@ function SetupDialog({
       <div className="setup-dialog">
         <div className="setup-heading">
           <div>
-            <span className="network-boundary">PRIVATE LAN / VPN ONLY</span>
+            <NetworkBoundaryNote badge />
             <h1>
               {required ? "Set up WatchWeaver" : "Configure integrations"}
             </h1>

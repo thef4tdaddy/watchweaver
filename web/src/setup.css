@@ -25,7 +25,7 @@
   padding: 28px; box-shadow: 0 30px 100px #0007; color: var(--ink);
 }
 .setup-heading { display: flex; justify-content: space-between; gap: 20px; }
-.network-boundary {
+.network-boundary-badge {
   display: inline-flex; align-items: center; padding: 7px 10px;
   border: 1px solid var(--cyan); border-radius: 999px; background: #164e63;
   color: #cffafe; font-size: 10px; letter-spacing: .16em; font-weight: 900;

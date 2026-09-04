@@ -226,7 +226,10 @@ describe("WatchWeaver dashboard", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Status" }));
     expect(
-      await screen.findByText(
+      await screen.findByText("Private network required"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
         "Trakt VIP is currently required for new API applications.",
       ),
     ).toBeInTheDocument();

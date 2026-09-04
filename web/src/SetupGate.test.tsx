@@ -24,7 +24,7 @@ describe('first-run setup',()=>{
     vi.stubGlobal('fetch',fetchMock);render(<SetupGate/>);expect(await screen.findByText('Set up WatchWeaver')).toBeInTheDocument()
     expect(screen.getByText(/Trakt VIP is currently required for new API applications/i)).toBeInTheDocument()
     expect(screen.getByText(/Trakt policy, not a WatchWeaver subscription/i)).toBeInTheDocument()
-    expect(screen.getByText('PRIVATE LAN / VPN ONLY')).toHaveClass('network-boundary')
+    expect(screen.getByText('PRIVATE LAN / VPN ONLY')).toHaveClass('network-boundary-badge')
     fireEvent.click(screen.getByText('How to get your Trakt Client ID and Secret'))
     screen.getAllByRole('link',{name:/Trakt API applications/i}).forEach(link=>expect(link).toHaveAttribute('href','https://trakt.tv/oauth/applications'))
     expect(screen.getByText('urn:ietf:wg:oauth:2.0:oob')).toBeInTheDocument()
