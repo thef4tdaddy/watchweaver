@@ -27,9 +27,50 @@ func (h *HistoryImporter) SetClientID(clientID string) { h.clientID = strings.Tr
 type HistoryImportResult struct {
 	Imported         int
 	Skipped          int
+	Scanned          int
 	Pages            int
 	NewWatchEventIDs []int64
 	FinaleSeasonIDs  []int64
+}
+
+// ImportFinalesSince scans a bounded history window and only writes explicit
+// season/series finale records. It is intended for metadata backfills: replaying
+// every non-finale watch through the normal importer makes large libraries take
+// minutes and performs thousands of unnecessary SQLite transactions.
+func (h *HistoryImporter) ImportFinalesSince(ctx context.Context, since time.Time) (HistoryImportResult, error) {
+	var r HistoryImportResult
+	for page := 1; ; page++ {
+		items, pages, err := h.fetchPage(ctx, page, since)
+		if err != nil {
+			return r, err
+		}
+		r.Pages++
+		r.Scanned += len(items)
+		for _, item := range items {
+			if item.Episode == nil || !metadata.FinaleFromTrakt(item.Episode.EpisodeType).CompletesSeason() {
+				continue
+			}
+			inserted, eventID, err := h.persistItem(ctx, item, false)
+			if err != nil {
+				return r, err
+			}
+			if inserted {
+				r.Imported++
+			} else {
+				r.Skipped++
+			}
+			seasonID, baselineEvent, err := h.seasonForEvent(ctx, eventID)
+			if err != nil {
+				return r, err
+			}
+			if seasonID != 0 && !baselineEvent {
+				r.FinaleSeasonIDs = appendUnique(r.FinaleSeasonIDs, seasonID)
+			}
+		}
+		if page >= pages {
+			return r, nil
+		}
+	}
 }
 
 type RetryableError struct {

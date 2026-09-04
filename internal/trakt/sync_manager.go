@@ -15,6 +15,8 @@ import (
 
 var ErrSyncInProgress = errors.New("trakt sync is already running")
 
+const finaleReconciliationWindow = 30 * 24 * time.Hour
+
 type SyncManagerOptions struct {
 	BaseURL, ClientID string
 	HTTPClient        *http.Client
@@ -191,8 +193,9 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 	if complete, err := m.state(ctx, "finale_prompt_backfill_complete"); err != nil {
 		return result, err
 	} else if complete != "1" {
-		log.Printf("Trakt finale prompt reconciliation started")
-		backfill, err := importer.ImportIncrementalSince(ctx, time.Time{})
+		since := m.options.Now().UTC().Add(-finaleReconciliationWindow)
+		log.Printf("Trakt finale prompt reconciliation started (window=30d since=%s)", since.Format(time.RFC3339))
+		backfill, err := importer.ImportFinalesSince(ctx, since)
 		if err != nil {
 			return result, err
 		}
@@ -202,7 +205,7 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 		if err := m.set(ctx, "finale_prompt_backfill_complete", "1"); err != nil {
 			return result, err
 		}
-		log.Printf("Trakt finale prompt reconciliation completed: seasons=%d", len(backfill.FinaleSeasonIDs))
+		log.Printf("Trakt finale prompt reconciliation completed: pages=%d items_scanned=%d finales=%d", backfill.Pages, backfill.Scanned, len(backfill.FinaleSeasonIDs))
 	}
 	if len(finaleSeasonIDs) > 0 {
 		created, err := prompts.NewService(m.db).Apply(ctx, prompts.Batch{CompletedSeasonIDs: finaleSeasonIDs})
