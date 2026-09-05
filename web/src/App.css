@@ -45,3 +45,4 @@ textarea,input{background:#020617;color:var(--ink)}
 .toggle-row{gap:16px}.toggle-row>div{min-width:0}.toggle{min-width:44px;flex:0 0 44px}.threshold-summary{color:var(--muted);font-size:12px;line-height:1.55;margin:0 0 18px}
 .jellyfin-token strong{font-size:14px;letter-spacing:.03em;overflow-wrap:anywhere;user-select:all}
 .credential-fields,.discord-settings{margin-top:18px;padding-top:4px}.settings-actions{display:flex;gap:10px;flex-wrap:wrap}.success-message{color:#a5f3fc;font-size:13px;font-weight:700}.settings-message{grid-column:1/-1;margin:0;padding:12px 14px;border:1px solid #22d3ee;border-radius:10px;background:#164e63}
+.credential-toggle{margin-top:18px}

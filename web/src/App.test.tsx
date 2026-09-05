@@ -225,7 +225,7 @@ describe("WatchWeaver dashboard", () => {
     ).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(
-      await screen.findByText("Integration availability"),
+      await screen.findByRole("heading", { name: "Discord" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/webhook-secret|access_token|refresh_token/i),
@@ -235,7 +235,7 @@ describe("WatchWeaver dashboard", () => {
       "Remind me after 20 transferable changes or 14 days, whichever comes first.",
     );
   });
-  it("uses aligned local icons and explains Trakt API access on Status", async () => {
+  it("uses aligned local icons and hides Trakt API setup guidance when healthy", async () => {
     render(<App />);
     await screen.findByText("The Example");
     const navigation = screen.getByRole("navigation", {
@@ -256,13 +256,8 @@ describe("WatchWeaver dashboard", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("Private network required")).toHaveLength(1);
     expect(
-      screen.getByText(
-        "Trakt VIP is currently required for new API applications.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/This is a Trakt policy, not a WatchWeaver subscription/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/Trakt VIP is currently required/i),
+    ).not.toBeInTheDocument();
   });
   it("submits exact canonical rating values", async () => {
     render(<App />);
@@ -343,6 +338,25 @@ describe("WatchWeaver dashboard", () => {
 		expect(await screen.findByText("one-time-jellyfin-token")).toBeInTheDocument();
 		await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/integrations/jellyfin", expect.objectContaining({ method: "POST" })));
 	});
+  it("keeps connected Trakt credentials collapsed until explicitly edited", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    expect(
+      await screen.findByRole("button", { name: "Edit Trakt configuration" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Client ID")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit Trakt configuration" }),
+    );
+    expect(screen.getByLabelText("Client ID")).toBeInTheDocument();
+    expect(screen.getByLabelText("Client secret")).toHaveAttribute(
+      "type",
+      "password",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel editing" }));
+    expect(screen.queryByLabelText("Client ID")).not.toBeInTheDocument();
+  });
   it("manages Discord configuration from settings", async () => {
     render(<App />);
     await screen.findByText("The Example");
