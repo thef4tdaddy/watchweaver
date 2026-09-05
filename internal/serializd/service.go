@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+type ReviewTransfer struct {
+	ReviewID        int64      `json:"review_id"`
+	MediaID         int64      `json:"media_id"`
+	MediaType       string     `json:"media_type"`
+	Title           string     `json:"title"`
+	ShowTitle       string     `json:"show_title,omitempty"`
+	SeasonNumber    *int       `json:"season_number,omitempty"`
+	EpisodeNumber   *int       `json:"episode_number,omitempty"`
+	Rating          *int       `json:"rating,omitempty"`
+	Body            string     `json:"body"`
+	ReviewUpdatedAt time.Time  `json:"review_updated_at"`
+	TransferredAt   *time.Time `json:"transferred_at,omitempty"`
+}
+
 const ImportURL = "https://www.serializd.com/trakt"
 
 type Options struct {
@@ -127,6 +141,85 @@ func (s *Service) MarkReminderAnnounced(ctx context.Context) error {
 	changed, _ := result.RowsAffected()
 	if changed == 0 {
 		return errors.New("Serializd reminder is not due")
+	}
+	return nil
+}
+
+func (s *Service) Reviews(ctx context.Context, includeTransferred bool) ([]ReviewTransfer, error) {
+	query := `SELECT r.id,r.media_id,m.media_type,m.title,
+		COALESCE(show.title,''),season.season_number,m.episode_number,ratings.rating,r.body,r.updated_at,
+		CASE WHEN t.review_updated_at=r.updated_at THEN t.transferred_at ELSE NULL END
+	FROM reviews r JOIN media_items m ON m.id=r.media_id
+	LEFT JOIN media_items season ON (m.media_type='episode' AND season.id=m.parent_id) OR (m.media_type='season' AND season.id=m.id)
+	LEFT JOIN media_items show ON show.id=season.parent_id
+	LEFT JOIN ratings ON ratings.media_id=m.id
+	LEFT JOIN serializd_review_transfers t ON t.review_id=r.id
+	WHERE m.media_type IN ('season','episode')`
+	if !includeTransferred {
+		query += ` AND (t.review_id IS NULL OR t.review_updated_at<>r.updated_at)`
+	}
+	query += ` ORDER BY r.updated_at DESC,r.id DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReviewTransfer{}
+	for rows.Next() {
+		var item ReviewTransfer
+		var season, episode, rating sql.NullInt64
+		var updated string
+		var transferred sql.NullString
+		if err := rows.Scan(&item.ReviewID, &item.MediaID, &item.MediaType, &item.Title, &item.ShowTitle, &season, &episode, &rating, &item.Body, &updated, &transferred); err != nil {
+			return nil, err
+		}
+		item.ReviewUpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
+		if err != nil {
+			return nil, err
+		}
+		if season.Valid {
+			v := int(season.Int64)
+			item.SeasonNumber = &v
+		}
+		if episode.Valid {
+			v := int(episode.Int64)
+			item.EpisodeNumber = &v
+		}
+		if rating.Valid {
+			v := int(rating.Int64)
+			item.Rating = &v
+		}
+		if transferred.Valid {
+			v, parseErr := time.Parse(time.RFC3339Nano, transferred.String)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			item.TransferredAt = &v
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Service) SetReviewTransferred(ctx context.Context, reviewID int64, transferred bool) error {
+	if !transferred {
+		result, err := s.db.ExecContext(ctx, `DELETE FROM serializd_review_transfers WHERE review_id=?`, reviewID)
+		if err != nil {
+			return err
+		}
+		count, _ := result.RowsAffected()
+		if count == 0 {
+			return sql.ErrNoRows
+		}
+		return nil
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO serializd_review_transfers(review_id,review_updated_at,transferred_at) SELECT id,updated_at,? FROM reviews WHERE id=? ON CONFLICT(review_id) DO UPDATE SET review_updated_at=excluded.review_updated_at,transferred_at=excluded.transferred_at`, s.now().UTC().Format(time.RFC3339Nano), reviewID)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
 }

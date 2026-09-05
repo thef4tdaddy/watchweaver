@@ -37,6 +37,44 @@ func TestCountThresholdAndTransferableChanges(t *testing.T) {
 	}
 }
 
+func TestReviewTransferPersistsAndEditReopens(t *testing.T) {
+	db, episode, season := serializdDB(t)
+	service := NewService(db)
+	_, _ = db.Exec(`INSERT INTO ratings(media_id,rating,source) VALUES(?,9,'local')`, episode)
+	result, err := db.Exec(`INSERT INTO reviews(media_id,body,updated_at) VALUES(?,'Finale was great','2026-09-01T00:00:00Z')`, episode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewID, _ := result.LastInsertId()
+	items, err := service.Reviews(context.Background(), false)
+	if err != nil || len(items) != 1 || items[0].ShowTitle == "" || items[0].SeasonNumber == nil || items[0].EpisodeNumber == nil || items[0].Rating == nil {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if err := service.SetReviewTransferred(context.Background(), reviewID, true); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ = service.Reviews(context.Background(), false); len(items) != 0 {
+		t.Fatalf("transferred review still pending: %+v", items)
+	}
+	if items, _ = service.Reviews(context.Background(), true); len(items) != 1 || items[0].TransferredAt == nil || items[0].Body != "Finale was great" {
+		t.Fatalf("transferred=%+v", items)
+	}
+	_, _ = db.Exec(`UPDATE reviews SET body='Edited text',updated_at='2026-09-02T00:00:00Z' WHERE id=?`, reviewID)
+	if items, _ = service.Reviews(context.Background(), false); len(items) != 1 || items[0].TransferredAt != nil || items[0].Body != "Edited text" {
+		t.Fatalf("edited=%+v", items)
+	}
+	if err := service.SetReviewTransferred(context.Background(), reviewID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetReviewTransferred(context.Background(), reviewID, false); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ = service.Reviews(context.Background(), false); len(items) != 1 {
+		t.Fatalf("undo=%+v", items)
+	}
+	_ = season
+}
+
 func TestBaselineAndSeasonActivityDoNotCount(t *testing.T) {
 	db, episode, season := serializdDB(t)
 	addEpisodeWatch(t, db, episode, "baseline", true)

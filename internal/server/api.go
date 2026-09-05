@@ -112,6 +112,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/letterboxd/batches/", a.letterboxdBatch)
 	mux.HandleFunc("/api/serializd", a.serializdStatus)
 	mux.HandleFunc("/api/serializd/mark-synced", a.serializdMarkSynced)
+	mux.HandleFunc("/api/serializd/reviews", a.serializdReviews)
+	mux.HandleFunc("/api/serializd/reviews/", a.serializdReviewTransfer)
 }
 
 func (a *API) serializdOptions(ctx context.Context) (serializd.Options, error) {
@@ -156,6 +158,51 @@ func (a *API) serializdMarkSynced(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *API) serializdReviews(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	items, err := a.serializd.Reviews(r.Context(), r.URL.Query().Get("include_transferred") == "true")
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) serializdReviewTransfer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/serializd/reviews/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 2 || parts[1] != "transferred" {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || id < 1 {
+		badRequest(w, "invalid review id")
+		return
+	}
+	var body struct {
+		Transferred bool `json:"transferred"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := a.serializd.SetReviewTransferred(r.Context(), id, body.Transferred); errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		internalError(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) letterboxdStatus(w http.ResponseWriter, r *http.Request) {
@@ -775,7 +822,13 @@ func (a *API) loadSettings(ctx context.Context) (settingsJSON, error) {
 			out.UpdateChecksEnabled, _ = strconv.ParseBool(v)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	if _, err := time.LoadLocation(out.Timezone); err != nil {
+		out.Timezone = "UTC"
+	}
+	return out, nil
 }
 
 func (a *API) integrationStatus(w http.ResponseWriter, r *http.Request) {
