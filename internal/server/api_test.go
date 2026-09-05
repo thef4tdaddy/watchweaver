@@ -355,6 +355,9 @@ func TestOperationalStatusAndRedactedDiagnostics(t *testing.T) {
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Header().Get("Content-Disposition"), "watchweaver-diagnostics.json") {
 		t.Fatalf("diagnostics response: %d %v", rr.Code, rr.Header())
 	}
+	if !strings.Contains(rr.Body.String(), `"build":{"revision":"","version":"dev"}`) {
+		t.Fatalf("diagnostics missing safe build identity: %s", rr.Body.String())
+	}
 	for _, private := range []string{"The Example", "watchweaver.db", "access_token", "webhook_url"} {
 		if strings.Contains(rr.Body.String(), private) {
 			t.Fatalf("diagnostics leaked %q: %s", private, rr.Body.String())
