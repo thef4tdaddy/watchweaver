@@ -62,6 +62,8 @@ func newHandlerWithAPI(readiness *Readiness, staticAssets fs.FS, api *API) http.
 	if api != nil {
 		api.Register(mux)
 		mux.HandleFunc("/api/integrations/jellyfin", api.jellyfinConfig)
+		mux.HandleFunc("/api/integrations/jellyfin/remote", api.jellyfinRemoteConfig)
+		mux.HandleFunc("/api/integrations/jellyfin/remote/test", api.jellyfinRemoteTest)
 		mux.HandleFunc("/api/v1/ingest/jellyfin/events", api.jellyfinIngest)
 	}
 	if staticAssets != nil {

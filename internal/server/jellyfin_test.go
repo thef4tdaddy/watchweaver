@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/thef4tdaddy/watchweaver/internal/credentials"
+	"github.com/thef4tdaddy/watchweaver/internal/jellyfin"
+	"github.com/thef4tdaddy/watchweaver/internal/jellyfinremote"
 )
 
 const validJellyfinEvent = `{"schema_version":1,"event_id":"event-1","event_type":"played","occurred_at":"2026-09-03T16:00:00Z","server":{"id":"server-a","version":"10.11.0"},"plugin":{"version":"0.1.0","target_abi":"10.11.0.0"},"user":{"id":"user-a"},"item":{"id":"item-a","type":"movie","title":"Movie","year":2026,"provider_ids":{"tmdb":"123"}},"playback":{"played":true,"progress_percent":100}}`
@@ -32,6 +34,32 @@ func jellyfinFixture(t *testing.T) (*apiFixture, string) {
 		t.Fatal(err)
 	}
 	return f, body.Token
+}
+
+func TestRemoteJellyfinConfigurationIsEncryptedAndRedacted(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	store, err := credentials.Open(f.db, filepath.Join(t.TempDir(), "key"), credentials.Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.api.SetCredentialStore(store)
+	manager := jellyfinremote.New(nil, jellyfin.NewService(f.db))
+	f.api.SetJellyfinRemoteManager(manager)
+	rr := f.request(http.MethodPut, "/api/integrations/jellyfin/remote", `{"enabled":true,"url":"https://jellyfin.example/","user_id":"user-a","api_key":"super-secret-key"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "super-secret-key") {
+		t.Fatal("API returned secret")
+	}
+	rr = f.request(http.MethodGet, "/api/integrations/jellyfin/remote", "")
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "super-secret-key") || !strings.Contains(rr.Body.String(), `"configured":true`) {
+		t.Fatalf("get: %d %s", rr.Code, rr.Body.String())
+	}
+	var plaintext int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM encrypted_credentials WHERE CAST(ciphertext AS TEXT) LIKE '%super-secret-key%'`).Scan(&plaintext); err != nil || plaintext != 0 {
+		t.Fatalf("plaintext=%d err=%v", plaintext, err)
+	}
 }
 func ingestRequest(f *apiFixture, token, key, body string) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()

@@ -15,6 +15,8 @@ import (
 	"github.com/thef4tdaddy/watchweaver/internal/config"
 	"github.com/thef4tdaddy/watchweaver/internal/credentials"
 	"github.com/thef4tdaddy/watchweaver/internal/discord"
+	"github.com/thef4tdaddy/watchweaver/internal/jellyfin"
+	"github.com/thef4tdaddy/watchweaver/internal/jellyfinremote"
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 	"github.com/thef4tdaddy/watchweaver/internal/server"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
@@ -102,6 +104,13 @@ func main() {
 	api.SetCredentialStore(credentialStore)
 	api.SetDiscordNotifier(discordNotifier)
 	api.SetTraktSyncManager(traktSync)
+	remoteKey, err := credentialStore.Get(context.Background(), "jellyfin_remote", "api_key")
+	if err != nil {
+		log.Fatalf("load remote Jellyfin API key failed: %v", err)
+	}
+	jellyfinRemote := jellyfinremote.New(nil, jellyfin.NewService(db))
+	jellyfinRemote.Configure(server.LoadJellyfinRemoteConfig(context.Background(), db, remoteKey))
+	api.SetJellyfinRemoteManager(jellyfinRemote)
 	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, api))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -113,6 +122,11 @@ func main() {
 		}
 	}()
 	startDiscordNotifier(ctx, discordNotifier)
+	go func() {
+		if err := jellyfinRemote.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("Jellyfin remote connection stopped: %v", err)
+		}
+	}()
 
 	log.Printf("watchweaver listening on %s", listener.Addr().String())
 

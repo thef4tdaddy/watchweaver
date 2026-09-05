@@ -7,6 +7,7 @@ import {
   type Batch,
   type HistoryItem,
   type Integrations,
+  type JellyfinRemote,
   type LetterboxdStatus,
   type OperationalStatus,
   type Page,
@@ -1032,6 +1033,10 @@ function SettingsView({
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationMessage, setIntegrationMessage] = useState("");
 	const [jellyfinToken, setJellyfinToken] = useState("");
+  const [jellyfinRemote, setJellyfinRemote] = useState<JellyfinRemote>();
+  const [jellyfinURL, setJellyfinURL] = useState("");
+  const [jellyfinAPIKey, setJellyfinAPIKey] = useState("");
+  const [jellyfinUserID, setJellyfinUserID] = useState("");
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -1041,6 +1046,9 @@ function SettingsView({
         setSetup(value);
         setDiscordEnabled(value.discord.enabled);
       })
+      .catch((e) => onError(e.message));
+    request<JellyfinRemote>("/api/integrations/jellyfin/remote")
+      .then((value) => { setJellyfinRemote(value); setJellyfinURL(value.url || ""); setJellyfinUserID(value.user_id || ""); })
       .catch((e) => onError(e.message));
   }, [onError]);
   const runIntegrationAction = async (action: () => Promise<string>) => {
@@ -1098,6 +1106,17 @@ function SettingsView({
 			setJellyfinToken("");
 			return "Jellyfin connection token revoked.";
 		});
+  const saveRemoteJellyfin = () =>
+    runIntegrationAction(async () => {
+      const value = await request<JellyfinRemote>("/api/integrations/jellyfin/remote", { method: "PUT", body: JSON.stringify({ enabled: true, url: jellyfinURL, user_id: jellyfinUserID, api_key: jellyfinAPIKey }) });
+      setJellyfinRemote(value); setJellyfinAPIKey("");
+      return "Remote Jellyfin connection saved. WatchWeaver is connecting now.";
+    });
+  const testRemoteJellyfin = () =>
+    runIntegrationAction(async () => {
+      const value = await request<{server_version:string}>("/api/integrations/jellyfin/remote/test", { method: "POST" });
+      return `Connected to Jellyfin ${value.server_version}.`;
+    });
   const save = async () => {
     if (!settings) return;
     if (!isValidTimezone(settings.timezone)) {
@@ -1190,6 +1209,15 @@ function SettingsView({
 				{setup.jellyfin?.configured && <button className="secondary" disabled={integrationBusy} onClick={() => void revokeJellyfinToken()}>Revoke token</button>}
 			</div>
 			{jellyfinToken && <div className="auth-code jellyfin-token"><p>Paste this token into the Jellyfin plugin now:</p><strong>{jellyfinToken}</strong><button className="secondary" onClick={() => void copyToClipboard(jellyfinToken).then(() => setIntegrationMessage("Jellyfin token copied.")).catch((error) => onError(error.message))}>Copy token</button></div>}
+			<div className="credential-fields">
+				<p className="eyebrow">REMOTE JELLYFIN (RECOMMENDED FOR SEEDBOXES)</p>
+				<p>WatchWeaver connects outward to Jellyfin, so your private WatchWeaver server does not need to be exposed.</p>
+				<label>Jellyfin URL<input type="url" value={jellyfinURL} onChange={(event)=>setJellyfinURL(event.target.value)} placeholder="https://jellyfin.example.com" /></label>
+				<label>Jellyfin API key<input type="password" value={jellyfinAPIKey} onChange={(event)=>setJellyfinAPIKey(event.target.value)} placeholder={jellyfinRemote?.configured ? "Leave blank to keep the saved key" : "API key"} autoComplete="new-password" /></label>
+				<label>Jellyfin user ID (optional)<input value={jellyfinUserID} onChange={(event)=>setJellyfinUserID(event.target.value)} placeholder="Limit recovery checks to one user" /></label>
+				<div className="connection-info"><StatusDot ok={jellyfinRemote?.connected === true} label={jellyfinRemote?.connected ? "Remote stream connected" : jellyfinRemote?.configured ? "Remote stream reconnecting" : "Remote stream not configured"} />{jellyfinRemote?.last_event_at && <p>Last event: {formatDate(jellyfinRemote.last_event_at)} · {jellyfinRemote.events_received} received</p>}{jellyfinRemote?.last_error && <small className="warning">{jellyfinRemote.last_error}</small>}</div>
+				<div className="settings-actions"><button className="primary" disabled={integrationBusy || !jellyfinURL || (!jellyfinAPIKey && !jellyfinRemote?.configured)} onClick={()=>void saveRemoteJellyfin()}>Save and connect</button><button className="secondary" disabled={integrationBusy || !jellyfinRemote?.configured} onClick={()=>void testRemoteJellyfin()}>Test connection</button></div>
+			</div>
 			<div className="override-note">This receiver is intended for private LAN/VPN use. The token is encrypted at rest and never returned after this screen is dismissed.</div>
 		</div>
       <div className="settings-card">
