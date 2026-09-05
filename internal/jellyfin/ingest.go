@@ -79,16 +79,19 @@ type Result struct {
 	ProtocolVersion int   `json:"protocol_version"`
 }
 type Status struct {
-	Configured        bool    `json:"configured"`
-	ProtocolVersion   int     `json:"protocol_version"`
-	AcceptedCount     int64   `json:"accepted_count"`
-	AuthFailureCount  int64   `json:"auth_failure_count"`
-	LastAcceptedAt    *string `json:"last_accepted_at,omitempty"`
-	LastServerVersion *string `json:"last_server_version,omitempty"`
-	LastPluginVersion *string `json:"last_plugin_version,omitempty"`
-	LastRejectionAt   *string `json:"last_rejection_at,omitempty"`
-	LastRejectionCode *string `json:"last_rejection_code,omitempty"`
-	LastAuthFailureAt *string `json:"last_auth_failure_at,omitempty"`
+	Configured             bool    `json:"configured"`
+	ProtocolVersion        int     `json:"protocol_version"`
+	AcceptedCount          int64   `json:"accepted_count"`
+	AuthFailureCount       int64   `json:"auth_failure_count"`
+	LastAcceptedAt         *string `json:"last_accepted_at,omitempty"`
+	LastServerVersion      *string `json:"last_server_version,omitempty"`
+	LastPluginVersion      *string `json:"last_plugin_version,omitempty"`
+	LastRejectionAt        *string `json:"last_rejection_at,omitempty"`
+	LastRejectionCode      *string `json:"last_rejection_code,omitempty"`
+	LastAuthFailureAt      *string `json:"last_auth_failure_at,omitempty"`
+	LastProbeAt            *string `json:"last_probe_at,omitempty"`
+	LastProbeServerVersion *string `json:"last_probe_server_version,omitempty"`
+	LastProbePluginVersion *string `json:"last_probe_plugin_version,omitempty"`
 }
 type Service struct{ db *sql.DB }
 
@@ -200,10 +203,13 @@ func (s *Service) RecordAuthFailure(ctx context.Context) {
 func (s *Service) RecordRejection(ctx context.Context, code string) {
 	_, _ = s.db.ExecContext(ctx, `UPDATE jellyfin_ingest_status SET last_rejection_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_rejection_code=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton=1`, code)
 }
+func (s *Service) RecordProbe(ctx context.Context, serverVersion, pluginVersion string) {
+	_, _ = s.db.ExecContext(ctx, `UPDATE jellyfin_ingest_status SET last_probe_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_probe_server_version=?,last_probe_plugin_version=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton=1`, trim(serverVersion), trim(pluginVersion))
+}
 func (s *Service) Status(ctx context.Context, configured bool) (Status, error) {
 	out := Status{Configured: configured, ProtocolVersion: 1}
-	var a, b, c, d, e, f sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT accepted_count,auth_failure_count,last_accepted_at,last_server_version,last_plugin_version,last_rejection_at,last_rejection_code,last_auth_failure_at FROM jellyfin_ingest_status WHERE singleton=1`).Scan(&out.AcceptedCount, &out.AuthFailureCount, &a, &b, &c, &d, &e, &f)
+	var a, b, c, d, e, f, g, h, i sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT accepted_count,auth_failure_count,last_accepted_at,last_server_version,last_plugin_version,last_rejection_at,last_rejection_code,last_auth_failure_at,last_probe_at,last_probe_server_version,last_probe_plugin_version FROM jellyfin_ingest_status WHERE singleton=1`).Scan(&out.AcceptedCount, &out.AuthFailureCount, &a, &b, &c, &d, &e, &f, &g, &h, &i)
 	if err != nil {
 		return Status{}, err
 	}
@@ -213,6 +219,7 @@ func (s *Service) Status(ctx context.Context, configured bool) (Status, error) {
 	out.LastRejectionAt = nullable(d)
 	out.LastRejectionCode = nullable(e)
 	out.LastAuthFailureAt = nullable(f)
+	out.LastProbeAt, out.LastProbeServerVersion, out.LastProbePluginVersion = nullable(g), nullable(h), nullable(i)
 	return out, nil
 }
 func nullable(v sql.NullString) *string {

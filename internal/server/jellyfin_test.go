@@ -127,9 +127,15 @@ func TestJellyfinAuthenticatedConnectionProbe(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodHead, "/api/v1/ingest/jellyfin/events", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Jellyfin-Server-Version", "10.11.0")
+	req.Header.Set("X-WatchWeaver-Plugin-Version", "0.1.0.2")
 	f.handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent || rr.Header().Get("X-WatchWeaver-Protocol-Version") != "1" {
 		t.Fatalf("probe: %d %#v", rr.Code, rr.Header())
+	}
+	rr = f.request(http.MethodGet, "/api/integrations", "")
+	if !strings.Contains(rr.Body.String(), `"last_probe_server_version":"10.11.0"`) || !strings.Contains(rr.Body.String(), `"last_probe_plugin_version":"0.1.0.2"`) || strings.Contains(rr.Body.String(), token) {
+		t.Fatalf("probe status: %s", rr.Body.String())
 	}
 }
 

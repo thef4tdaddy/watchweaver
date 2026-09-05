@@ -312,9 +312,11 @@ function getJellyfinState(value?: Integrations["jellyfin"]) {
   if (!value?.configured) return { ok: false, label: "Not configured" };
   const rejected = value.last_rejection_at ? Date.parse(value.last_rejection_at) : 0;
   const accepted = value.last_accepted_at ? Date.parse(value.last_accepted_at) : 0;
+  const probed = value.last_probe_at ? Date.parse(value.last_probe_at) : 0;
   const authFailure = value.last_auth_failure_at ? Date.parse(value.last_auth_failure_at) : 0;
-  if (Math.max(rejected, authFailure) > accepted) return { ok: false, label: "Needs attention" };
+  if (Math.max(rejected, authFailure) > Math.max(accepted, probed)) return { ok: false, label: "Needs attention" };
   if (accepted) return { ok: true, label: "Receiving" };
+  if (probed) return { ok: true, label: "Connected · waiting" };
   return { ok: true, label: "Ready" };
 }
 function humanStatus(value?: string) {
@@ -1180,7 +1182,7 @@ function SettingsView({
 					<StatusDot ok label="Events received" />
 					<p>Last event: {formatDate(integrations.jellyfin.last_accepted_at)}</p>
 					<p>Jellyfin {integrations.jellyfin.last_server_version || "unknown"} · plugin {integrations.jellyfin.last_plugin_version || "unknown"}</p>
-				</> : <StatusDot ok={Boolean(setup.jellyfin?.configured)} label={setup.jellyfin?.configured ? "Waiting for the first event" : "Generate a token to connect"} />}
+				</> : <><StatusDot ok={Boolean(integrations.jellyfin?.last_probe_at)} label={integrations.jellyfin?.last_probe_at ? "Plugin connected · waiting for the first event" : setup.jellyfin?.configured ? "Waiting for the plugin heartbeat" : "Generate a token to connect"} />{integrations.jellyfin?.last_probe_at && <p>Last heartbeat: {formatDate(integrations.jellyfin.last_probe_at)} · Jellyfin {integrations.jellyfin.last_probe_server_version || "unknown"} · plugin {integrations.jellyfin.last_probe_plugin_version || "unknown"}</p>}</>}
 				{integrations.jellyfin?.last_rejection_code && <small className="warning">Latest rejected delivery: {integrations.jellyfin.last_rejection_code}</small>}
 			</div>
 			<div className="settings-actions">

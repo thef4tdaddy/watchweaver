@@ -89,6 +89,7 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodHead {
+		svc.RecordProbe(r.Context(), r.Header.Get("X-Jellyfin-Server-Version"), r.Header.Get("X-WatchWeaver-Plugin-Version"))
 		w.Header().Set("X-WatchWeaver-Protocol-Version", "1")
 		w.WriteHeader(http.StatusNoContent)
 		return
