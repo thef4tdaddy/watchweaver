@@ -123,6 +123,19 @@ export type Integrations = {
   serializd: { enabled: boolean; status: string };
   discord: { enabled: boolean; status: string };
 };
+export type JellyfinRemote = {
+  configured: boolean;
+  enabled: boolean;
+  url?: string;
+  user_id?: string;
+  connected: boolean;
+  last_connected_at?: string;
+  last_event_at?: string;
+  last_error?: string;
+  reconnect_count: number;
+  events_received: number;
+  protocol_version: number;
+};
 export type OperationalComponent = {
   state: "working" | "waiting" | "needs_attention" | "disabled";
   label: string;
