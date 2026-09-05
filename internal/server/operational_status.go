@@ -122,11 +122,19 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		return result, err
 	}
 	if jellyfinConfigured {
-		detail := "Connected and waiting for events."
+		state, detail := "waiting", "Ready and waiting for the first event."
 		if jellyfinStatus.LastAcceptedAt != nil {
-			detail = "Events are being accepted durably."
+			state, detail = "working", "Events are being accepted durably. Last received "+*jellyfinStatus.LastAcceptedAt+"."
 		}
-		result.Components["jellyfin"] = operationalComponent{State: "working", Label: "Jellyfin", Detail: detail, Action: "configure"}
+		lastAccepted := statusTime(jellyfinStatus.LastAcceptedAt)
+		if statusTime(jellyfinStatus.LastRejectionAt).After(lastAccepted) || statusTime(jellyfinStatus.LastAuthFailureAt).After(lastAccepted) {
+			state, detail = "needs_attention", "The most recent Jellyfin delivery was rejected. Check or rotate the plugin token."
+		}
+		action := ""
+		if state == "needs_attention" {
+			action = "configure"
+		}
+		result.Components["jellyfin"] = operationalComponent{State: state, Label: "Jellyfin", Detail: detail, Action: action}
 	} else {
 		result.Components["jellyfin"] = operationalComponent{State: "disabled", Label: "Jellyfin", Detail: "Jellyfin ingestion is not configured.", Action: "configure"}
 	}
@@ -141,9 +149,9 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		return result, err
 	}
 	if letterboxdStatus.PendingRows > 0 {
-		result.Components["letterboxd"] = operationalComponent{State: "working", Label: "Letterboxd", Detail: "Movie activity is ready to export.", Action: "open"}
+		result.Components["letterboxd"] = operationalComponent{State: "needs_attention", Label: "Letterboxd", Detail: "Movie activity is ready to export.", Action: "open"}
 	} else {
-		result.Components["letterboxd"] = operationalComponent{State: "working", Label: "Letterboxd", Detail: "No movie exports are waiting.", Action: "open"}
+		result.Components["letterboxd"] = operationalComponent{State: "waiting", Label: "Letterboxd", Detail: "No movie exports are waiting."}
 	}
 	serialStatus, err := a.serializd.Status(ctx, serializdOptionsFromSettings(settings))
 	if err != nil {
@@ -154,7 +162,7 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 	} else if serialStatus.Due {
 		result.Components["serializd"] = operationalComponent{State: "needs_attention", Label: "Serializd", Detail: "It is time to run the Serializd importer.", Action: "open"}
 	} else {
-		result.Components["serializd"] = operationalComponent{State: "working", Label: "Serializd", Detail: "Reminder thresholds have not been reached.", Action: "open"}
+		result.Components["serializd"] = operationalComponent{State: "waiting", Label: "Serializd", Detail: "Reminder thresholds have not been reached."}
 	}
 	if err := a.db.PingContext(ctx); err != nil {
 		result.Components["database"] = operationalComponent{State: "needs_attention", Label: "Database", Detail: "The database is unavailable."}
@@ -171,6 +179,14 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		result.Overall = "needs_attention"
 	}
 	return result, nil
+}
+
+func statusTime(value *string) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	parsed, _ := time.Parse(time.RFC3339Nano, *value)
+	return parsed
 }
 
 func serializdOptionsFromSettings(settings settingsJSON) serializd.Options {

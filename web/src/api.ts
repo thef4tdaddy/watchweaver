@@ -112,13 +112,14 @@ export type Integrations = {
 		last_plugin_version?: string;
 		last_rejection_at?: string;
 		last_rejection_code?: string;
+		last_auth_failure_at?: string;
 	};
   letterboxd: { enabled: boolean; status: string };
   serializd: { enabled: boolean; status: string };
   discord: { enabled: boolean; status: string };
 };
 export type OperationalComponent = {
-  state: "working" | "needs_attention" | "disabled";
+  state: "working" | "waiting" | "needs_attention" | "disabled";
   label: string;
   detail: string;
   action?: string;
@@ -167,6 +168,19 @@ export type SerializdStatus = {
   reminder_changes: number;
   reminder_days: number;
   import_url: string;
+};
+export type SerializdReview = {
+  review_id: number;
+  media_id: number;
+  media_type: "season" | "episode";
+  title: string;
+  show_title?: string;
+  season_number?: number;
+  episode_number?: number;
+  rating?: number;
+  body: string;
+  review_updated_at: string;
+  transferred_at?: string;
 };
 export class APIError extends Error {
   status: number;

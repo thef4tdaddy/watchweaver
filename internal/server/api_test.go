@@ -439,6 +439,31 @@ func TestSerializdStatusAndMarkSyncedAPI(t *testing.T) {
 	}
 }
 
+func TestSerializdReviewTransferAPI(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	show := mustExecID(t, f.db, `INSERT INTO media_items(media_type,title) VALUES('show','Show')`)
+	season := mustExecID(t, f.db, `INSERT INTO media_items(media_type,title,parent_id,season_number) VALUES('season','Season',?,1)`, show)
+	episode := mustExecID(t, f.db, `INSERT INTO media_items(media_type,title,parent_id,episode_number) VALUES('episode','Finale',?,10)`, season)
+	review := mustExecID(t, f.db, `INSERT INTO reviews(media_id,body) VALUES(?,'A huge ending')`, episode)
+	rr := f.request(http.MethodGet, "/api/serializd/reviews", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"body":"A huge ending"`) {
+		t.Fatalf("list: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodPut, fmt.Sprintf("/api/serializd/reviews/%d/transferred", review), `{"transferred":true}`)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("mark: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr = f.request(http.MethodGet, "/api/serializd/reviews", ""); !strings.Contains(rr.Body.String(), `"items":[]`) {
+		t.Fatalf("pending: %s", rr.Body.String())
+	}
+	if rr = f.request(http.MethodGet, "/api/serializd/reviews?include_transferred=true", ""); !strings.Contains(rr.Body.String(), `"transferred_at"`) {
+		t.Fatalf("all: %s", rr.Body.String())
+	}
+	if rr = f.request(http.MethodPut, fmt.Sprintf("/api/serializd/reviews/%d/transferred", review), `{"transferred":false}`); rr.Code != http.StatusNoContent {
+		t.Fatalf("undo: %d", rr.Code)
+	}
+}
+
 func TestUIManagedEncryptedIntegrationConfiguration(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	store, err := credentials.Open(f.db, filepath.Join(t.TempDir(), "credential.key"), credentials.Overrides{})

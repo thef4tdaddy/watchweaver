@@ -45,6 +45,7 @@ const task: Task = {
   },
 };
 let activeTask: Task | undefined = task;
+let serializdReviews: Array<Record<string, unknown>> = [];
 function json(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -56,6 +57,7 @@ function json(body: unknown, status = 200) {
 
 beforeEach(() => {
   activeTask = task;
+  serializdReviews = [];
   currentIntegrations = integrations;
   vi.stubGlobal(
     "fetch",
@@ -97,6 +99,13 @@ beforeEach(() => {
           reminder_days: 14,
           import_url: "https://serializd.example/import",
         });
+      if (path === "/api/serializd/reviews?include_transferred=false") return json({ items: serializdReviews.filter((item) => !item.transferred_at) });
+      if (path === "/api/serializd/reviews?include_transferred=true") return json({ items: serializdReviews });
+      if (path.match(/^\/api\/serializd\/reviews\/\d+\/transferred$/) && init?.method === "PUT") {
+        const transferred = JSON.parse(String(init.body)).transferred;
+        serializdReviews = serializdReviews.map((item) => ({...item, transferred_at: transferred ? "2026-09-05T12:00:00Z" : undefined}));
+        return Promise.resolve(new Response(null,{status:204}));
+      }
       if (path === "/api/letterboxd")
         return json({
           pending_rows: 1,
@@ -411,6 +420,30 @@ describe("WatchWeaver dashboard", () => {
     render(<App />);
     expect(await screen.findByText("Jellyfin · Ready")).toBeInTheDocument();
     expect(await screen.findByText(/after watch activity is processed/)).toBeInTheDocument();
+  });
+  it("copies and durably confirms Serializd television reviews", async () => {
+    serializdReviews = [{ review_id: 7, media_id: 12, media_type: "episode", title: "Finale", show_title: "Silo", season_number: 3, episode_number: 10, rating: 9, body: "That ending.", review_updated_at: "2026-09-05T10:00:00Z" }];
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator,"clipboard",{value:{writeText},configurable:true});
+    render(<App />);
+    fireEvent.click(screen.getByRole("button",{name:"Television"}));
+    expect(await screen.findByText("That ending.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Copy review"}));
+    expect(writeText).toHaveBeenCalledWith("That ending.");
+    fireEvent.click(screen.getByRole("button",{name:"Mark transferred"}));
+    await waitFor(()=>expect(screen.queryByText("That ending.")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("Show transferred"));
+    expect(await screen.findByRole("button",{name:"Mark not transferred"})).toBeInTheDocument();
+  });
+  it("uses a searchable supported timezone selector and blocks invalid values", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button",{name:"Settings"}));
+    const timezone = await screen.findByDisplayValue("UTC");
+    expect(timezone).toHaveAttribute("list","watchweaver-timezones");
+    fireEvent.change(timezone,{target:{value:"Mars/Olympus"}});
+    fireEvent.click(screen.getByRole("button",{name:"Save preferences"}));
+    expect(await screen.findByText("Choose a supported timezone from the list.")).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalledWith("/api/settings",expect.objectContaining({method:"PUT"}));
   });
   it("shows scheduled polling and refreshes the inbox when it completes", async () => {
     let inboxCalls = 0;

@@ -54,6 +54,7 @@ beforeEach(() => {
           reminder_days: 14,
           import_url: "https://serializd.example/import",
         });
+      if (path.startsWith("/api/serializd/reviews")) return json({ items: [] });
       return json({ error: "not found" }, 404);
     }),
   );

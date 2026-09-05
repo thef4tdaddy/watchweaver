@@ -13,6 +13,7 @@ import {
   type Rating,
   type Review,
   type SerializdStatus,
+  type SerializdReview,
   type Settings,
   type SetupStatus,
   type Task,
@@ -62,11 +63,7 @@ function App() {
     return () => window.clearInterval(timer);
   }, [refreshInboxCount, refreshIntegrations]);
   const traktConnected = integrations?.trakt.authorization.status === "connected";
-  const historySourceLabel = traktConnected
-    ? "Trakt · Connected"
-    : integrations?.jellyfin?.configured
-      ? "Jellyfin · Ready"
-      : "History source · Not configured";
+  const jellyfinState = getJellyfinState(integrations?.jellyfin);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -95,10 +92,8 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <StatusDot
-            ok={traktConnected || integrations?.jellyfin?.configured === true}
-            label={historySourceLabel}
-          />
+          <StatusDot ok={traktConnected} label={`Trakt · ${traktConnected ? "Connected" : "Not connected"}`} />
+          <StatusDot ok={jellyfinState.ok} label={`Jellyfin · ${jellyfinState.label}`} />
           <small className="version-label">Version {updateStatus?.running_version || buildVersion}</small>
           <StatusDot
             ok={integrations?.discord.enabled === true}
@@ -210,9 +205,11 @@ function StatusView({
     }
   };
   if (!status) return <Loading />;
-  const entries = [
-    ...Object.entries(status.components),
-    ["backup", status.backup] as const,
+  const groups: [string, string, string[]][] = [
+    ["Sources", "Automated watch-history connections", ["trakt", "jellyfin"]],
+    ["Manual transfers", "Workflows that need a step from you", ["letterboxd", "serializd"]],
+    ["Notifications", "Optional outbound alerts", ["discord"]],
+    ["System", "Storage, recovery, diagnostics, and updates", ["database", "backup"]],
   ];
   return (
     <section>
@@ -231,9 +228,13 @@ function StatusView({
         </button>
       </div>
       <NetworkBoundaryNote />
-      <UpdateCard status={updateStatus} onUpdate={setUpdateStatus} onError={onError} />
-      <div className="settings-grid">
-        {entries.map(([name, component]) => (
+      {groups.map(([heading, description, names]) => <div className="status-group" key={heading}>
+        <div className="status-group-heading"><div><p className="eyebrow">{heading}</p><h2>{description}</h2></div></div>
+        <div className="settings-grid">
+        {names.map((name) => {
+          const component = name === "backup" ? status.backup : status.components[name];
+          if (!component) return null;
+          return (
           <article className="settings-card" key={name}>
             <div className="card-heading">
               <h2>{component.label}</h2>
@@ -273,15 +274,13 @@ function StatusView({
                   <code>.key</code> files together.
                 </div>
               )}
-              {component.action === "diagnostics" && (
-                <a className="primary" href="/api/diagnostics" download>
-                  Download diagnostics
-                </a>
-              )}
             </div>
           </article>
-        ))}
-      </div>
+        )})}
+        {heading === "System" && <article className="settings-card"><div className="card-heading"><h2>Diagnostics</h2><span className="state confirmed">Available</span></div><p>Download safe troubleshooting metadata. It excludes credentials and private media details.</p><a className="primary" href="/api/diagnostics" download>Download diagnostics</a></article>}
+        {heading === "System" && <UpdateCard status={updateStatus} onUpdate={setUpdateStatus} onError={onError} />}
+        </div>
+      </div>)}
     </section>
   );
 }
@@ -309,7 +308,17 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
     </div>
   );
 }
+function getJellyfinState(value?: Integrations["jellyfin"]) {
+  if (!value?.configured) return { ok: false, label: "Not configured" };
+  const rejected = value.last_rejection_at ? Date.parse(value.last_rejection_at) : 0;
+  const accepted = value.last_accepted_at ? Date.parse(value.last_accepted_at) : 0;
+  const authFailure = value.last_auth_failure_at ? Date.parse(value.last_auth_failure_at) : 0;
+  if (Math.max(rejected, authFailure) > accepted) return { ok: false, label: "Needs attention" };
+  if (accepted) return { ok: true, label: "Receiving" };
+  return { ok: true, label: "Ready" };
+}
 function humanStatus(value?: string) {
+  if (value === "needs_attention") return "Action needed";
   return (value || "not configured").replaceAll("_", " ");
 }
 function formatDate(value?: string) {
@@ -318,6 +327,28 @@ function formatDate(value?: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+const fallbackTimezones = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "Europe/London", "Europe/Paris", "Asia/Tokyo", "Australia/Sydney"];
+function supportedTimezones(current: string) {
+  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+  const values = intl.supportedValuesOf?.("timeZone") || fallbackTimezones;
+  return Array.from(new Set([current, ...values].filter(Boolean))).sort();
+}
+function timezoneLabel(zone: string) {
+  try {
+    const name = new Intl.DateTimeFormat(undefined, { timeZone: zone, timeZoneName: "long" }).formatToParts(new Date()).find((part) => part.type === "timeZoneName")?.value;
+    return name && name !== zone ? `${zone} — ${name}` : zone;
+  } catch { return `${zone} — saved legacy value`; }
+}
+function isValidTimezone(zone: string) {
+  try { new Intl.DateTimeFormat(undefined, { timeZone: zone }).format(); return true; }
+  catch { return false; }
+}
+function TimezoneSelector({value,onChange}:{value:string;onChange:(value:string)=>void}) {
+  const device = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const zones = supportedTimezones(value);
+  return <><input aria-label="Timezone" list="watchweaver-timezones" value={value} onChange={(event)=>onChange(event.target.value)} aria-describedby="timezone-help"/><datalist id="watchweaver-timezones">{zones.map((zone)=><option key={zone} value={zone}>{timezoneLabel(zone)}</option>)}</datalist><small id="timezone-help">Search supported timezones. This device suggests {timezoneLabel(device)}.</small></>;
 }
 function mediaLabel(media: Task["media"]) {
   if (media.type === "episode")
@@ -833,6 +864,9 @@ function Movies({ onError }: { onError: (v: string) => void }) {
 function Television({ onError }: { onError: (v: string) => void }) {
   const [status, setStatus] = useState<SerializdStatus>();
   const [marking, setMarking] = useState(false);
+  const [reviews, setReviews] = useState<SerializdReview[]>([]);
+  const [showTransferred, setShowTransferred] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState<number>();
   const load = useCallback(
     () =>
       request<SerializdStatus>("/api/serializd")
@@ -843,6 +877,13 @@ function Television({ onError }: { onError: (v: string) => void }) {
   useEffect(() => {
     void load();
   }, [load]);
+  const loadReviews = useCallback(() => request<{items: SerializdReview[]}>(`/api/serializd/reviews?include_transferred=${showTransferred}`).then((value) => setReviews(value.items)).catch((e) => onError(e.message)), [onError, showTransferred]);
+  useEffect(() => { void loadReviews(); }, [loadReviews]);
+  const transfer = async (review: SerializdReview, transferred: boolean) => {
+    setReviewBusy(review.review_id);
+    try { await request(`/api/serializd/reviews/${review.review_id}/transferred`, {method:"PUT", body:JSON.stringify({transferred})}); await loadReviews(); }
+    catch (e) { onError((e as Error).message); } finally { setReviewBusy(undefined); }
+  };
   const mark = async () => {
     setMarking(true);
     try {
@@ -958,6 +999,10 @@ function Television({ onError }: { onError: (v: string) => void }) {
           it is not your latest Trakt check or episode watch.
         </p>
       </div>
+      <div className="review-transfer-section">
+        <div className="section-heading"><div><p className="eyebrow">MANUAL BRIDGE</p><h2>Reviews to copy</h2><p>Serializd cannot receive review text through its Trakt importer. Copy each review, paste it into Serializd, then mark it transferred.</p></div><label className="inline-check"><input type="checkbox" checked={showTransferred} onChange={(e)=>setShowTransferred(e.target.checked)}/> Show transferred</label></div>
+        {reviews.length === 0 ? <Empty title={showTransferred ? "No television reviews" : "No reviews waiting"} body={showTransferred ? "Write a season or episode review from History to see it here." : "Transferred reviews stay safely stored and can be shown at any time."}/> : <div className="review-transfer-list">{reviews.map((review) => <article className="settings-card" key={review.review_id}><div className="card-heading"><div><span className="tag">{review.media_type}</span><h3>{review.show_title || review.title}{review.season_number !== undefined ? ` · S${review.season_number}` : ""}{review.episode_number !== undefined ? ` E${review.episode_number}` : ""}</h3></div><span className={`state ${review.transferred_at ? "confirmed" : "pending"}`}>{review.transferred_at ? "Transferred" : "Waiting"}</span></div>{review.rating && <p>{review.rating / 2} ★</p>}<blockquote>{review.body}</blockquote><small>Updated {formatDate(review.review_updated_at)}</small><div className="actions"><button className="primary" onClick={() => void copyToClipboard(review.body).catch((e)=>onError(e.message))}>Copy review</button><button className="secondary" disabled={reviewBusy===review.review_id} onClick={()=>void transfer(review,!review.transferred_at)}>{review.transferred_at ? "Mark not transferred" : "Mark transferred"}</button></div></article>)}</div>}
+      </div>
     </section>
   );
 }
@@ -1055,6 +1100,10 @@ function SettingsView({
 		});
   const save = async () => {
     if (!settings) return;
+    if (!isValidTimezone(settings.timezone)) {
+      onError("Choose a supported timezone from the list.");
+      return;
+    }
     try {
       setSettings(
         await request<Settings>("/api/settings", {
@@ -1322,13 +1371,10 @@ function SettingsView({
         <p className="mobile-version">Running version: <strong>{updateStatus?.running_version || buildVersion}</strong></p>
         <label>
           Timezone
-          <input
+          <TimezoneSelector
             value={settings.timezone}
-            onChange={(e) =>
-              setSettings({ ...settings, timezone: e.target.value })
-            }
+            onChange={(timezone) => setSettings({ ...settings, timezone })}
           />
-          <small>Use an IANA timezone such as America/Chicago.</small>
         </label>
         <label>
           Trakt polling interval (minutes)
