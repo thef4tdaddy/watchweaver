@@ -26,6 +26,8 @@ const settings = {
   trakt_poll_minutes: 5,
   prompt_movies_enabled: true,
   prompt_tv_enabled: true,
+  prompt_ratings_enabled: true,
+  prompt_reviews_enabled: true,
   serializd_enabled: true,
   serializd_reminder_changes: 20,
   serializd_reminder_days: 14,
@@ -211,7 +213,7 @@ describe("WatchWeaver dashboard", () => {
   it("hides the inbox attention dot when no prompts are actionable", async () => {
     activeTask = undefined;
     render(<App />);
-    expect(await screen.findByText("No rating prompts waiting")).toBeInTheDocument();
+    expect(await screen.findByText("No prompts waiting")).toBeInTheDocument();
     expect(screen.queryByText("•")).not.toBeInTheDocument();
   });
   it("does not show the ambiguous local refresh button", async () => {
@@ -461,7 +463,7 @@ describe("WatchWeaver dashboard", () => {
     expect(screen.queryByText("No rating prompts waiting")).not.toBeInTheDocument();
     currentIntegrations = integrations;
     await new Promise((resolve) => window.setTimeout(resolve, 3100));
-    await waitFor(() => expect(screen.getByText("No rating prompts waiting")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("No prompts waiting")).toBeInTheDocument());
     expect(inboxCalls).toBeGreaterThan(1);
   }, 5000);
   it("treats scheduled polling as idle rather than an active sync", async () => {
