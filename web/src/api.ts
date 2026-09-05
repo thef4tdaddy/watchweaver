@@ -115,6 +115,9 @@ export type Integrations = {
 		last_rejection_at?: string;
 		last_rejection_code?: string;
 		last_auth_failure_at?: string;
+		last_probe_at?: string;
+		last_probe_server_version?: string;
+		last_probe_plugin_version?: string;
 	};
   letterboxd: { enabled: boolean; status: string };
   serializd: { enabled: boolean; status: string };
