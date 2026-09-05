@@ -35,10 +35,13 @@ Supported release architectures for v0.1:
 
 Release tags include an immutable version tag and commit-SHA tag. WatchWeaver publishes two moving channels:
 
-- Git tags such as `v0.1.0-beta.1` update the container tag `beta`.
+- Every green merge to `develop` updates the multi-architecture `beta` tag and publishes an immutable `sha-…` tag. Failed or cancelled builds never reach the publishing job.
+- Optional Git tags such as `v0.2.0-beta.1`, created from `develop`, also publish that immutable version and update `beta`.
 - Stable Git tags such as `v0.1.0` update the container tag `latest` and the stable minor tag such as `0.1`.
 
 Beta releases never update `latest`. Production deployments should prefer an immutable version tag for predictable upgrades.
+
+To roll back, replace `beta` or `latest` in Compose with the previous semantic tag, SHA tag, or digest, pull, and recreate the container. Keep `/data` mounted; create a database backup before rolling across schema versions.
 
 The running version is shown at the bottom of the desktop sidebar and in Settings on smaller screens. Status can check GitHub Releases for the newest release in the installed channel: beta builds compare only with prereleases and stable builds compare only with stable releases. Development builds identify themselves as `dev` and never claim to be outdated.
 

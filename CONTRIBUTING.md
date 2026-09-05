@@ -54,6 +54,12 @@ The race detector is enabled in CI on `ubuntu-latest`, where Go race builds are 
 
 Pull requests should explain what changed, why it changed, how it was tested, and any new configuration or migration requirements.
 
+Normal `feat/*`, `fix/*`, documentation, and dependency pull requests target `develop`. A green merge to `develop` publishes the multi-architecture `beta` container plus an immutable `sha-…` tag. Pull requests build and test containers but never publish them.
+
+Stable promotion uses an explicit `develop` → `main` pull request after beta testing. Stable `vX.Y.Z` tags are created from `main`; only those tags publish `latest`. Optional numbered prereleases such as `v0.2.0-beta.1` are cut from `develop`, while ordinary develop builds use only `beta` and their SHA tag.
+
+Emergency `hotfix/*` branches start from `main`, merge to `main`, and must then be merged back into `develop`. Direct and force pushes to either long-lived branch are prohibited. Use squash merges so history remains linear.
+
 ## License
 
 By contributing to WatchWeaver, you agree that your contribution may be distributed under the project's PolyForm Noncommercial License 1.0.0.
