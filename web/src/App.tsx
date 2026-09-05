@@ -244,7 +244,9 @@ function StatusView({
               </span>
             </div>
             <p>{component.detail}</p>
-            {name === "trakt" && <TraktAccessNote compact />}
+            {name === "trakt" && component.state !== "working" && (
+              <TraktAccessNote compact />
+            )}
             {name === "backup" && status.backup.last_backup && (
               <p>
                 Latest backup: {formatDate(status.backup.last_backup)} ·{" "}
@@ -979,6 +981,7 @@ function SettingsView({
   const [setup, setSetup] = useState<SetupStatus>();
   const [clientID, setClientID] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [traktEditorOpen, setTraktEditorOpen] = useState(false);
   const [webhook, setWebhook] = useState("");
   const [discordEnabled, setDiscordEnabled] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState(false);
@@ -1021,6 +1024,7 @@ function SettingsView({
       });
       setClientID("");
       setClientSecret("");
+      setTraktEditorOpen(false);
       return "Trakt credentials saved.";
     });
   const saveDiscord = () =>
@@ -1109,6 +1113,8 @@ function SettingsView({
   };
   if (!settings || !integrations || !setup) return <Loading />;
   const trakt = integrations.trakt;
+  const traktConnected = trakt.authorization.status === "connected";
+  const showTraktEditor = !traktConnected || traktEditorOpen;
   return (
     <section className="settings-grid">
       {integrationMessage && (
@@ -1232,57 +1238,83 @@ function SettingsView({
             )}
           </div>
         )}
-        <div className="override-note">
-          Saved credentials are encrypted and write-only. Environment overrides,
-          when present, lock those fields.
-        </div>
-        <div className="credential-fields">
-          <label>
-            Client ID
-            <input
-              disabled={setup.trakt.client_id_overridden}
-              value={clientID}
-              onChange={(e) => setClientID(e.target.value)}
-              autoComplete="off"
-              placeholder={
-                setup.trakt.client_id_overridden
-                  ? "Locked by environment"
-                  : setup.trakt.configured
-                    ? "Configured — enter to replace"
-                    : "Paste Trakt client ID"
-              }
-            />
-          </label>
-          <label>
-            Client secret
-            <input
-              disabled={setup.trakt.client_secret_overridden}
-              type="password"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              autoComplete="new-password"
-              placeholder={
-                setup.trakt.client_secret_overridden
-                  ? "Locked by environment"
-                  : setup.trakt.configured
-                    ? "Configured — enter to replace"
-                    : "Paste Trakt client secret"
-              }
-            />
-          </label>
+        {traktConnected && !traktEditorOpen && (
           <button
-            className="secondary"
-            disabled={
-              integrationBusy ||
-              (!setup.trakt.configured &&
-                ((!setup.trakt.client_id_overridden && !clientID) ||
-                  (!setup.trakt.client_secret_overridden && !clientSecret)))
-            }
-            onClick={() => void saveTraktCredentials()}
+            className="secondary credential-toggle"
+            onClick={() => setTraktEditorOpen(true)}
           >
-            Save Trakt credentials
+            Edit Trakt configuration
           </button>
-        </div>
+        )}
+        {showTraktEditor && (
+          <>
+            <div className="override-note">
+              Saved credentials are encrypted and write-only. Environment
+              overrides, when present, lock those fields.
+            </div>
+            <div className="credential-fields">
+              <label>
+                Client ID
+                <input
+                  disabled={setup.trakt.client_id_overridden}
+                  value={clientID}
+                  onChange={(e) => setClientID(e.target.value)}
+                  autoComplete="off"
+                  placeholder={
+                    setup.trakt.client_id_overridden
+                      ? "Locked by environment"
+                      : setup.trakt.configured
+                        ? "Configured — enter to replace"
+                        : "Paste Trakt client ID"
+                  }
+                />
+              </label>
+              <label>
+                Client secret
+                <input
+                  disabled={setup.trakt.client_secret_overridden}
+                  type="password"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={
+                    setup.trakt.client_secret_overridden
+                      ? "Locked by environment"
+                      : setup.trakt.configured
+                        ? "Configured — enter to replace"
+                        : "Paste Trakt client secret"
+                  }
+                />
+              </label>
+            <div className="settings-actions">
+              <button
+                className="secondary"
+                disabled={
+                  integrationBusy ||
+                  (!setup.trakt.configured &&
+                    ((!setup.trakt.client_id_overridden && !clientID) ||
+                      (!setup.trakt.client_secret_overridden && !clientSecret)))
+                }
+                onClick={() => void saveTraktCredentials()}
+              >
+                Save Trakt credentials
+              </button>
+              {traktConnected && (
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setClientID("");
+                    setClientSecret("");
+                    setTraktEditorOpen(false);
+                  }}
+                >
+                  Cancel editing
+                </button>
+              )}
+            </div>
+          </div>
+          </>
+        )}
       </div>
       <div className="settings-card">
         <p className="eyebrow">PREFERENCES</p>
@@ -1426,14 +1458,10 @@ function SettingsView({
         </button>
       </div>
       <div className="settings-card full">
-        <p className="eyebrow">OPTIONAL SERVICES</p>
-        <h2>Integration availability</h2>
-        <div className="integration-row">
+        <div className="card-heading">
           <div>
-            <strong>Discord announcements</strong>
-            <small>
-              Outbound-only announcements through a write-only webhook
-            </small>
+            <p className="eyebrow">OPTIONAL ANNOUNCEMENTS</p>
+            <h2>Discord</h2>
           </div>
           <span
             className={`state ${integrations.discord.enabled ? "confirmed" : ""}`}
@@ -1441,6 +1469,7 @@ function SettingsView({
             {integrations.discord.status}
           </span>
         </div>
+        <p>Outbound-only announcements through a write-only webhook.</p>
         <div className="discord-settings">
           <div className="toggle-row">
             <div>
