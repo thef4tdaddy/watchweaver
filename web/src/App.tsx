@@ -1051,6 +1051,11 @@ function SettingsView({
       .then((value) => { setJellyfinRemote(value); setJellyfinURL(value.url || ""); setJellyfinUserID(value.user_id || ""); })
       .catch((e) => onError(e.message));
   }, [onError]);
+  useEffect(() => {
+    if (!jellyfinRemote?.configured) return;
+    const timer = window.setInterval(() => void request<JellyfinRemote>("/api/integrations/jellyfin/remote").then(setJellyfinRemote).catch(() => undefined), 5000);
+    return () => window.clearInterval(timer);
+  }, [jellyfinRemote?.configured]);
   const runIntegrationAction = async (action: () => Promise<string>) => {
     setIntegrationBusy(true);
     setIntegrationMessage("");

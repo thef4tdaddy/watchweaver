@@ -49,6 +49,7 @@ type Manager struct {
 	config Config
 	status Status
 	wake   chan struct{}
+	cancel context.CancelFunc
 }
 
 func New(client *http.Client, accept Accepter) *Manager {
@@ -62,12 +63,16 @@ func (m *Manager) Configure(cfg Config) {
 	cfg.URL = strings.TrimRight(strings.TrimSpace(cfg.URL), "/")
 	cfg.UserID = strings.TrimSpace(cfg.UserID)
 	m.mu.Lock()
+	cancel := m.cancel
 	m.config = cfg
 	m.status.Configured = cfg.URL != "" && cfg.APIKey != ""
 	m.status.Enabled = cfg.Enabled
 	m.status.URL = cfg.URL
 	m.status.UserID = cfg.UserID
 	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	select {
 	case m.wake <- struct{}{}:
 	default:
@@ -114,7 +119,15 @@ func (m *Manager) Run(ctx context.Context) error {
 				continue
 			}
 		}
-		err := m.consume(ctx, cfg)
+		streamCtx, cancel := context.WithCancel(ctx)
+		m.mu.Lock()
+		m.cancel = cancel
+		m.mu.Unlock()
+		err := m.consume(streamCtx, cfg)
+		cancel()
+		m.mu.Lock()
+		m.cancel = nil
+		m.mu.Unlock()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
