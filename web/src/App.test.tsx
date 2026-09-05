@@ -169,8 +169,10 @@ beforeEach(() => {
             action: "instructions",
           },
         });
-      if (path.startsWith("/api/tasks/") && init?.method === "POST")
+      if (path.startsWith("/api/tasks/") && init?.method === "POST") {
+        activeTask = undefined;
         return json({ state: "completed" });
+      }
       return json({ error: "not found" }, 404);
     }),
   );
@@ -195,6 +197,13 @@ describe("WatchWeaver dashboard", () => {
     expect(
       screen.getByText(/does not create a historical snapshot/i),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("1 inbox item waiting")).toBeInTheDocument();
+  });
+  it("hides the inbox attention dot when no prompts are actionable", async () => {
+    activeTask = undefined;
+    render(<App />);
+    expect(await screen.findByText("No rating prompts waiting")).toBeInTheDocument();
+    expect(screen.queryByText("•")).not.toBeInTheDocument();
   });
   it("does not show the ambiguous local refresh button", async () => {
     render(<App />);
@@ -221,6 +230,10 @@ describe("WatchWeaver dashboard", () => {
     expect(
       screen.queryByText(/webhook-secret|access_token|refresh_token/i),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText("Letterboxd")).not.toBeInTheDocument();
+    expect(screen.getByText(/whichever comes first/i)).toHaveTextContent(
+      "Remind me after 20 transferable changes or 14 days, whichever comes first.",
+    );
   });
   it("uses aligned local icons and explains Trakt API access on Status", async () => {
     render(<App />);
@@ -264,6 +277,9 @@ describe("WatchWeaver dashboard", () => {
           body: JSON.stringify({ rating: 9 }),
         }),
       ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("•")).not.toBeInTheDocument(),
     );
   });
   it("keeps episode prompts rating-only while directing reviews to History", async () => {

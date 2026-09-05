@@ -33,6 +33,7 @@ const buildVersion = import.meta.env.VITE_APP_VERSION || "dev";
 
 function App() {
   const [view, setView] = useState<View>("inbox");
+  const [inboxCount, setInboxCount] = useState(0);
   const [integrations, setIntegrations] = useState<Integrations>();
   const [error, setError] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>();
@@ -44,14 +45,22 @@ function App() {
     [],
   );
   const refreshUpdate = useCallback(() => request<UpdateStatus>("/api/update").then(setUpdateStatus).catch(() => undefined), []);
+  const refreshInboxCount = useCallback(
+    () => request<Page<Task>>("/api/inbox").then((data) => setInboxCount(data.total)).catch(() => undefined),
+    [],
+  );
   useEffect(() => {
     void refreshIntegrations();
     void refreshUpdate();
-  }, [refreshIntegrations, refreshUpdate]);
+    void refreshInboxCount();
+  }, [refreshInboxCount, refreshIntegrations, refreshUpdate]);
   useEffect(() => {
-    const timer = window.setInterval(() => void refreshIntegrations(), 3000);
+    const timer = window.setInterval(() => {
+      void refreshIntegrations();
+      void refreshInboxCount();
+    }, 3000);
     return () => window.clearInterval(timer);
-  }, [refreshIntegrations]);
+  }, [refreshInboxCount, refreshIntegrations]);
   const traktConnected = integrations?.trakt.authorization.status === "connected";
   const historySourceLabel = traktConnected
     ? "Trakt · Connected"
@@ -79,7 +88,9 @@ function App() {
             >
               <span className={`nav-icon ${icon}`} aria-hidden="true" />
               {label}
-              {id === "inbox" && <i>•</i>}
+              {id === "inbox" && inboxCount > 0 && (
+                <i aria-label={`${inboxCount} inbox item${inboxCount === 1 ? "" : "s"} waiting`}>•</i>
+              )}
             </button>
           ))}
         </nav>
@@ -115,6 +126,7 @@ function App() {
             syncPhase={integrations?.trakt.poll.phase}
             syncError={integrations?.trakt.sync.last_error || integrations?.trakt.poll.last_error}
             integrationLoaded={integrations !== undefined}
+            onCountChange={setInboxCount}
           />
         )}{" "}
         {view === "history" && <History onError={setError} />}{" "}
@@ -379,7 +391,7 @@ function StarRating({ value, onChange, label, emptyLabel = "Choose rating" }: { 
   </div>;
 }
 
-function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean }) {
+function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, onCountChange }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean; onCountChange: (count: number) => void }) {
   const [page, setPage] = useState<Page<Task>>();
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const [drafts, setDrafts] = useState<
@@ -392,6 +404,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }
     try {
       const data = await request<Page<Task>>("/api/inbox");
       setPage(data);
+      onCountChange(data.total);
       const pairs = await Promise.all(
         data.items.map(async (task) => {
           try {
@@ -423,7 +436,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded }
     } catch (e) {
       onError((e as Error).message);
     }
-  }, [onError]);
+  }, [onCountChange, onError]);
   // oxlint-disable react/set-state-in-effect -- the effect starts an external API synchronization.
   useEffect(() => {
     void load();
@@ -1375,7 +1388,7 @@ function SettingsView({
         </div>
         <div className="two-col">
           <label>
-            Change threshold
+            Transferable-change threshold
             <input
               type="number"
               min="1"
@@ -1387,9 +1400,10 @@ function SettingsView({
                 })
               }
             />
+            <small>Remind after this many TV changes since your last confirmed Serializd import.</small>
           </label>
           <label>
-            Day threshold
+            Elapsed-day threshold
             <input
               type="number"
               min="1"
@@ -1401,8 +1415,12 @@ function SettingsView({
                 })
               }
             />
+            <small>Remind after this many days since your last confirmed import.</small>
           </label>
         </div>
+        <p className="threshold-summary">
+          Remind me after {settings.serializd_reminder_changes} transferable change{settings.serializd_reminder_changes === 1 ? "" : "s"} or {settings.serializd_reminder_days} day{settings.serializd_reminder_days === 1 ? "" : "s"}, whichever comes first. Confirming an import resets both counters; it does not delete history.
+        </p>
         <button className="primary" onClick={() => void save()}>
           Save preferences
         </button>
@@ -1410,13 +1428,6 @@ function SettingsView({
       <div className="settings-card full">
         <p className="eyebrow">OPTIONAL SERVICES</p>
         <h2>Integration availability</h2>
-        <div className="integration-row">
-          <div>
-            <strong>Letterboxd</strong>
-            <small>Official CSV export workflow</small>
-          </div>
-          <span className="state confirmed">Available</span>
-        </div>
         <div className="integration-row">
           <div>
             <strong>Discord announcements</strong>
