@@ -125,9 +125,14 @@ func (a *API) buildOperationalStatus(ctx context.Context) (operationalStatus, er
 		state, detail := "waiting", "Ready and waiting for the first event."
 		if jellyfinStatus.LastAcceptedAt != nil {
 			state, detail = "working", "Events are being accepted durably. Last received "+*jellyfinStatus.LastAcceptedAt+"."
+		} else if jellyfinStatus.LastProbeAt != nil {
+			state, detail = "working", "The plugin is connected and waiting for the first watch event. Last heartbeat "+*jellyfinStatus.LastProbeAt+"."
 		}
-		lastAccepted := statusTime(jellyfinStatus.LastAcceptedAt)
-		if statusTime(jellyfinStatus.LastRejectionAt).After(lastAccepted) || statusTime(jellyfinStatus.LastAuthFailureAt).After(lastAccepted) {
+		lastSuccess := statusTime(jellyfinStatus.LastAcceptedAt)
+		if statusTime(jellyfinStatus.LastProbeAt).After(lastSuccess) {
+			lastSuccess = statusTime(jellyfinStatus.LastProbeAt)
+		}
+		if statusTime(jellyfinStatus.LastRejectionAt).After(lastSuccess) || statusTime(jellyfinStatus.LastAuthFailureAt).After(lastSuccess) {
 			state, detail = "needs_attention", "The most recent Jellyfin delivery was rejected. Check or rotate the plugin token."
 		}
 		action := ""
