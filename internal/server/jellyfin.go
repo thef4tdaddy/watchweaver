@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -85,11 +86,13 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 	provided := bearerToken(r.Header.Get("Authorization"))
 	if expected == "" || provided == "" || !secureEqual(expected, provided) {
 		svc.RecordAuthFailure(r.Context())
+		log.Printf("Jellyfin ingest authentication rejected")
 		writeError(w, http.StatusUnauthorized, "invalid Jellyfin ingestion token")
 		return
 	}
 	if r.Method == http.MethodHead {
 		svc.RecordProbe(r.Context(), r.Header.Get("X-Jellyfin-Server-Version"), r.Header.Get("X-WatchWeaver-Plugin-Version"))
+		log.Printf("Jellyfin heartbeat accepted: server_version=%q plugin_version=%q", r.Header.Get("X-Jellyfin-Server-Version"), r.Header.Get("X-WatchWeaver-Plugin-Version"))
 		w.Header().Set("X-WatchWeaver-Protocol-Version", "1")
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -97,20 +100,24 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 	var event jellyfin.Event
 	if !decodeJSON(w, r, &event) {
 		svc.RecordRejection(r.Context(), "invalid_json")
+		log.Printf("Jellyfin event rejected: code=invalid_json")
 		return
 	}
 	if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" && key != event.EventID {
 		svc.RecordRejection(r.Context(), "idempotency_key_mismatch")
+		log.Printf("Jellyfin event rejected: code=idempotency_key_mismatch event_id=%q", event.EventID)
 		writeCodeError(w, http.StatusBadRequest, "idempotency_key_mismatch", "Idempotency-Key must match event_id")
 		return
 	}
 	result, err := svc.Accept(r.Context(), event)
 	if errors.Is(err, jellyfin.ErrInvalidEvent) {
+		log.Printf("Jellyfin event rejected: code=invalid_event event_id=%q event_type=%q item_type=%q reason=%v", event.EventID, event.EventType, event.Item.Type, err)
 		writeCodeError(w, http.StatusBadRequest, "invalid_event", err.Error())
 		return
 	}
 	if errors.Is(err, jellyfin.ErrEventConflict) {
 		svc.RecordRejection(r.Context(), "event_conflict")
+		log.Printf("Jellyfin event rejected: code=event_conflict event_id=%q", event.EventID)
 		writeCodeError(w, http.StatusConflict, "event_conflict", err.Error())
 		return
 	}
@@ -122,6 +129,7 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 	if result.Duplicate {
 		status = http.StatusOK
 	}
+	log.Printf("Jellyfin event accepted: event_id=%q event_type=%q item_type=%q duplicate=%t", event.EventID, event.EventType, event.Item.Type, result.Duplicate)
 	writeJSON(w, status, result)
 }
 
