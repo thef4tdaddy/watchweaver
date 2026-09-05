@@ -16,7 +16,7 @@ func NewService(db *sql.DB) *Service {
 
 func (s *Service) Apply(ctx context.Context, batch Batch) ([]Decision, error) {
 	decisions := Evaluate(batch)
-	moviesEnabled, tvEnabled, err := s.preferences(ctx)
+	moviesEnabled, tvEnabled, ratingsEnabled, reviewsEnabled, err := s.preferences(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -26,6 +26,9 @@ func (s *Service) Apply(ctx context.Context, batch Batch) ([]Decision, error) {
 			continue
 		}
 		if decision.Kind != MovieRating && !tvEnabled {
+			continue
+		}
+		if !ratingsEnabled && (decision.Kind == EpisodeRating || !reviewsEnabled) {
 			continue
 		}
 		filtered = append(filtered, decision)
@@ -43,7 +46,15 @@ func (s *Service) Apply(ctx context.Context, batch Batch) ([]Decision, error) {
 
 	created := make([]Decision, 0, len(decisions))
 	for _, decision := range decisions {
-		inserted, err := insertDecision(ctx, tx, decision)
+		taskType := "rating"
+		if decision.Kind != EpisodeRating && reviewsEnabled {
+			if ratingsEnabled {
+				taskType = "rating_review"
+			} else {
+				taskType = "review"
+			}
+		}
+		inserted, err := insertDecision(ctx, tx, decision, taskType)
 		if err != nil {
 			return nil, err
 		}
@@ -57,33 +68,37 @@ func (s *Service) Apply(ctx context.Context, batch Batch) ([]Decision, error) {
 	return created, nil
 }
 
-func (s *Service) preferences(ctx context.Context) (bool, bool, error) {
-	movies, tv := true, true
-	rows, err := s.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('prompt_movies_enabled','prompt_tv_enabled')`)
+func (s *Service) preferences(ctx context.Context) (bool, bool, bool, bool, error) {
+	movies, tv, ratings, reviews := true, true, true, true
+	rows, err := s.db.QueryContext(ctx, `SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('prompt_movies_enabled','prompt_tv_enabled','prompt_ratings_enabled','prompt_reviews_enabled')`)
 	if err != nil {
-		return false, false, err
+		return false, false, false, false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
-			return false, false, err
+			return false, false, false, false, err
 		}
 		enabled := value == "true"
 		if key == "prompt_movies_enabled" {
 			movies = enabled
-		} else {
+		} else if key == "prompt_tv_enabled" {
 			tv = enabled
+		} else if key == "prompt_ratings_enabled" {
+			ratings = enabled
+		} else if key == "prompt_reviews_enabled" {
+			reviews = enabled
 		}
 	}
-	return movies, tv, rows.Err()
+	return movies, tv, ratings, reviews, rows.Err()
 }
 
-func insertDecision(ctx context.Context, tx *sql.Tx, decision Decision) (bool, error) {
+func insertDecision(ctx context.Context, tx *sql.Tx, decision Decision, taskType string) (bool, error) {
 	var exists int
-	query := `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND task_type='rating' AND state IN ('pending','snoozed')`
+	query := `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND state IN ('pending','snoozed')`
 	if decision.Kind == SeasonRating {
-		query = `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=? AND task_type='rating'`
+		query = `SELECT COUNT(*) FROM prompt_tasks WHERE media_id=?`
 	}
 	err := tx.QueryRowContext(ctx, query, decision.MediaID).Scan(&exists)
 	if err != nil {
@@ -93,7 +108,7 @@ func insertDecision(ctx context.Context, tx *sql.Tx, decision Decision) (bool, e
 		return false, nil
 	}
 
-	if _, err := tx.ExecContext(ctx, `INSERT INTO prompt_tasks(media_id,task_type,state) VALUES(?,'rating','pending')`, decision.MediaID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO prompt_tasks(media_id,task_type,state) VALUES(?,?,'pending')`, decision.MediaID, taskType); err != nil {
 		return false, fmt.Errorf("create %s prompt for media %d: %w", decision.Kind, decision.MediaID, err)
 	}
 	return true, nil

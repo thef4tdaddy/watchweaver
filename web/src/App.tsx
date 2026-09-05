@@ -509,10 +509,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
       {page.items.length === 0 && !integrationLoaded ? (
         <Loading />
       ) : page.items.length === 0 && !syncActive ? (
-        <Empty
-          title="No rating prompts waiting"
-          body="Eligible movie, season, and episode ratings will appear here after watch activity is processed. Optional reviews can always be added from History."
-        />
+        <Empty title="No prompts waiting" body="Eligible rating and review prompts will appear here after watch activity is processed. Episode reviews can always be added from History." />
       ) : (
         <div className="task-list">
           {page.items.map((task) => {
@@ -532,22 +529,22 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
                     </div>
                     <span className={`state ${task.state}`}>{task.state}</span>
                   </div>
-                  {existing && (
+                  {task.type !== "review" && existing && (
                     <div className="current-note">
                       Current rating: <strong>{existing / 2} ★</strong> ·
                       Submitting changes the current rating; it does not create
                       a historical snapshot.
                     </div>
                   )}
-                  <StarRating
+                  {task.type !== "review" && <StarRating
                     label={`Rating for ${task.media.title}`}
                     value={draft.rating}
                     onChange={(rating) => setDrafts((d) => ({
                       ...d,
                       [task.id]: { ...draft, rating },
                     }))}
-                  />
-                  {task.media.type !== "episode" && (
+                  />}
+                  {task.media.type !== "episode" && task.type !== "rating" && (
                     <textarea
                       value={draft.review}
                       onChange={(e) =>
@@ -572,12 +569,13 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
                       className="primary"
                       disabled={
                         busy === task.id ||
-                        (!draft.rating && !draft.review.trim())
+                        (task.type !== "review" && !draft.rating && (task.type === "rating" || !draft.review.trim())) ||
+                        (task.type === "review" && !draft.review.trim())
                       }
                       onClick={() =>
                         void act(task.id, "complete", {
-                          ...(draft.rating ? { rating: draft.rating } : {}),
-                          ...(task.media.type !== "episode" && draft.review.trim()
+                          ...(task.type !== "review" && draft.rating ? { rating: draft.rating } : {}),
+                          ...(task.media.type !== "episode" && task.type !== "rating" && draft.review.trim()
                             ? { review: draft.review }
                             : {}),
                         })
@@ -1406,8 +1404,22 @@ function SettingsView({
         </div>
         <div className="toggle-row">
           <div>
+            <strong>Prompt for ratings</strong>
+            <small>Ask for a rating after eligible movie watches, season completions, and caught-up episodes.</small>
+          </div>
+          <button role="switch" aria-label="Prompt for ratings" aria-checked={settings.prompt_ratings_enabled} className={`toggle ${settings.prompt_ratings_enabled ? "on" : ""}`} onClick={() => setSettings({...settings,prompt_ratings_enabled:!settings.prompt_ratings_enabled})}><span /></button>
+        </div>
+        <div className="toggle-row">
+          <div>
+            <strong>Prompt for optional reviews</strong>
+            <small>Offer an optional written review for movies and completed seasons. Episodes remain user-initiated from History.</small>
+          </div>
+          <button role="switch" aria-label="Prompt for optional reviews" aria-checked={settings.prompt_reviews_enabled} className={`toggle ${settings.prompt_reviews_enabled ? "on" : ""}`} onClick={() => setSettings({...settings,prompt_reviews_enabled:!settings.prompt_reviews_enabled})}><span /></button>
+        </div>
+        <div className="toggle-row">
+          <div>
             <strong>Movie prompts</strong>
-            <small>Create rating/review tasks for new movie watches.</small>
+            <small>Allow the selected prompt types for new movie watches.</small>
           </div>
           <button
             role="switch"
@@ -1427,7 +1439,7 @@ function SettingsView({
         <div className="toggle-row">
           <div>
             <strong>TV prompts</strong>
-            <small>Create supported season and episode rating tasks.</small>
+            <small>Allow the selected prompt types for season completions and eligible caught-up episodes.</small>
           </div>
           <button
             role="switch"

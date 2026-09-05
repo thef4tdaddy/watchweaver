@@ -38,6 +38,8 @@ export type Settings = {
   trakt_poll_minutes: number;
   prompt_movies_enabled: boolean;
   prompt_tv_enabled: boolean;
+  prompt_ratings_enabled: boolean;
+  prompt_reviews_enabled: boolean;
   serializd_enabled: boolean;
   serializd_reminder_changes: number;
   serializd_reminder_days: number;
