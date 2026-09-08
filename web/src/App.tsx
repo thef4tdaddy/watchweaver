@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import TraktAccessNote from "./TraktAccessNote";
 import NetworkBoundaryNote from "./NetworkBoundaryNote";
@@ -373,57 +373,14 @@ async function copyToClipboard(value: string) {
 }
 
 function StarRating({ value, onChange, label, emptyLabel = "Choose rating" }: { value?: number; onChange: (value: number) => void; label: string; emptyLabel?: string }) {
-  const [preview, setPreview] = useState<number>();
-  const [dragging, setDragging] = useState(false);
-  const shown = preview ?? value ?? 0;
-  const ratingAtPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return Math.max(1, Math.min(10, Math.ceil(((event.clientX - bounds.left) / bounds.width) * 10)));
-  };
-  return <div className="rating-row" aria-label={label} onMouseLeave={() => setPreview(undefined)}>
-    <div
-      className="star-picker"
-      onPointerDown={(event) => {
-        event.currentTarget.setPointerCapture(event.pointerId);
-        setDragging(true);
-        const rating = ratingAtPointer(event);
-        setPreview(rating);
-        onChange(rating);
-      }}
-      onPointerMove={(event) => {
-        if (!dragging) return;
-        const rating = ratingAtPointer(event);
-        setPreview(rating);
-        onChange(rating);
-      }}
-      onPointerUp={(event) => {
-        setDragging(false);
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }}
-      onPointerCancel={() => setDragging(false)}
-    >
-      {[1, 2, 3, 4, 5].map((star) => {
-        const half = star * 2 - 1;
-        const full = star * 2;
-        const fill = shown >= full ? "full" : shown >= half ? "half" : "empty";
-        return <span className={`rating-star ${fill}`} key={star}>
-          <span className="star-base" aria-hidden="true">★</span>
-          <span className="star-fill" aria-hidden="true">★</span>
-          {[half, full].map((rating) => <button
-            type="button"
-            className={`star-hit ${rating === half ? "left" : "right"}`}
-            key={rating}
-            title={`${rating / 2} stars`}
-            aria-label={`${rating / 2} stars`}
-            onMouseEnter={() => setPreview(rating)}
-            onFocus={() => setPreview(rating)}
-            onBlur={() => setPreview(undefined)}
-            onClick={() => onChange(rating)}
-          />)}
-        </span>;
-      })}
+  const shown = value ?? 0;
+  return <div className="rating-row">
+    <div className="star-picker">
+      <span className="star-track" aria-hidden="true">★★★★★</span>
+      <span className="star-fill" aria-hidden="true" style={{ width: `${shown * 10}%` }}>★★★★★</span>
+      <input type="range" min="1" max="10" step="1" value={shown || 1} aria-label={label} aria-valuetext={shown ? `${shown / 2} out of 5 stars` : emptyLabel} onChange={(event) => onChange(Number(event.target.value))} />
     </div>
-    <b>{shown ? `${shown / 2} / 5` : emptyLabel}</b>
+    <b>{shown ? <><strong>{shown / 2}</strong><span> / 5</span></> : emptyLabel}</b>
   </div>;
 }
 
@@ -1037,6 +994,7 @@ function SettingsView({
   const [jellyfinURL, setJellyfinURL] = useState("");
   const [jellyfinAPIKey, setJellyfinAPIKey] = useState("");
   const [jellyfinUserID, setJellyfinUserID] = useState("");
+  const [jellyfinMode, setJellyfinMode] = useState<"remote" | "push">("remote");
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -1195,13 +1153,15 @@ function SettingsView({
           {integrationMessage}
         </p>
       )}
-		<div className="settings-card">
+		<div className="settings-card jellyfin-card">
 			<div className="card-heading">
 				<div><p className="eyebrow">AUTOMATED SOURCE</p><h2>Jellyfin</h2></div>
-				<span className={`state ${setup.jellyfin?.configured ? "confirmed" : "pending"}`}>{setup.jellyfin?.configured ? "Ready" : "Not configured"}</span>
+				<span className={`state ${(jellyfinMode === "remote" ? jellyfinRemote?.connected : setup.jellyfin?.configured) ? "confirmed" : "pending"}`}>{jellyfinMode === "remote" ? jellyfinRemote?.connected ? "Connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not configured" : setup.jellyfin?.configured ? "Ready" : "Not configured"}</span>
 			</div>
-			<p>Connect the WatchWeaver Jellyfin plugin with a dedicated, write-only token. Jellyfin can be your only history source or work alongside Trakt.</p>
-			<div className="connection-info">
+			<p className="jellyfin-summary">Choose how Jellyfin and WatchWeaver can reach each other. Remote is best for a seedbox; local push is best when both are on the same private network.</p>
+			<div className="connection-tabs" role="group" aria-label="Jellyfin connection method"><button type="button" className={jellyfinMode === "remote" ? "active" : ""} onClick={()=>setJellyfinMode("remote")}><strong>Remote</strong><small>WatchWeaver connects out</small></button><button type="button" className={jellyfinMode === "push" ? "active" : ""} onClick={()=>setJellyfinMode("push")}><strong>Local push</strong><small>Plugin sends events in</small></button></div>
+			{jellyfinMode === "push" ? <div className="jellyfin-method">
+			<div className="connection-info compact">
 				{integrations.jellyfin?.last_accepted_at ? <>
 					<StatusDot ok label="Events received" />
 					<p>Last event: {formatDate(integrations.jellyfin.last_accepted_at)}</p>
@@ -1214,16 +1174,17 @@ function SettingsView({
 				{setup.jellyfin?.configured && <button className="secondary" disabled={integrationBusy} onClick={() => void revokeJellyfinToken()}>Revoke token</button>}
 			</div>
 			{jellyfinToken && <div className="auth-code jellyfin-token"><p>Paste this token into the Jellyfin plugin now:</p><strong>{jellyfinToken}</strong><button className="secondary" onClick={() => void copyToClipboard(jellyfinToken).then(() => setIntegrationMessage("Jellyfin token copied.")).catch((error) => onError(error.message))}>Copy token</button></div>}
-			<div className="credential-fields">
-				<p className="eyebrow">REMOTE JELLYFIN (RECOMMENDED FOR SEEDBOXES)</p>
-				<p>WatchWeaver connects outward to Jellyfin, so your private WatchWeaver server does not need to be exposed.</p>
+			<div className="override-note">Private LAN/VPN only. The receiving token is encrypted and is only shown when generated.</div>
+			</div> : <div className="jellyfin-method credential-fields">
+				<p>Enter the Jellyfin address WatchWeaver can reach and an API key created in the Jellyfin dashboard.</p>
+				<div className="two-col jellyfin-fields">
 				<label>Jellyfin URL<input type="url" value={jellyfinURL} onChange={(event)=>setJellyfinURL(event.target.value)} placeholder="https://jellyfin.example.com" /></label>
 				<label>Jellyfin API key<input type="password" value={jellyfinAPIKey} onChange={(event)=>setJellyfinAPIKey(event.target.value)} placeholder={jellyfinRemote?.configured ? "Leave blank to keep the saved key" : "API key"} autoComplete="new-password" /></label>
-				<label>Jellyfin user ID (optional)<input value={jellyfinUserID} onChange={(event)=>setJellyfinUserID(event.target.value)} placeholder="Limit recovery checks to one user" /></label>
-				<div className="connection-info"><StatusDot ok={jellyfinRemote?.connected === true} label={jellyfinRemote?.connected ? "Remote stream connected" : jellyfinRemote?.configured ? "Remote stream reconnecting" : "Remote stream not configured"} />{jellyfinRemote?.last_event_at && <p>Last event: {formatDate(jellyfinRemote.last_event_at)} · {jellyfinRemote.events_received} received</p>}{jellyfinRemote?.last_error && <small className="warning">{jellyfinRemote.last_error}</small>}</div>
+				</div>
+				<div className="connection-info compact"><StatusDot ok={jellyfinRemote?.connected === true} label={jellyfinRemote?.connected ? "Stream connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not connected"} />{jellyfinRemote?.last_event_at && <p>Last event {formatDate(jellyfinRemote.last_event_at)} · {jellyfinRemote.events_received} received</p>}{jellyfinRemote?.last_error && <small className="warning">{jellyfinRemote.last_error}</small>}</div>
 				<div className="settings-actions"><button className="primary" disabled={integrationBusy || !jellyfinURL || (!jellyfinAPIKey && !jellyfinRemote?.configured)} onClick={()=>void saveRemoteJellyfin()}>Save and connect</button><button className="secondary" disabled={integrationBusy || !jellyfinRemote?.configured} onClick={()=>void testRemoteJellyfin()}>Test connection</button></div>
-			</div>
-			<div className="override-note">This receiver is intended for private LAN/VPN use. The token is encrypted at rest and never returned after this screen is dismissed.</div>
+				<div className="override-note">Your API key is encrypted at rest. WatchWeaver stays private and only makes an outbound connection.</div>
+			</div>}
 		</div>
       <div className="settings-card">
         <div className="card-heading">

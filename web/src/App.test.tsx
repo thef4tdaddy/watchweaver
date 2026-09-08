@@ -66,6 +66,7 @@ beforeEach(() => {
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/integrations") return json(currentIntegrations);
+      if (path === "/api/integrations/jellyfin/remote") return json({ configured: true, enabled: true, url: "https://jellyfin.example", connected: true, reconnect_count: 0, events_received: 2, protocol_version: 1 });
       if (path === "/api/setup") return json({ complete: true, encrypted_storage: true, trakt: { configured: true, authorization_status: "connected", client_id_overridden: false, client_secret_overridden: false }, discord: { configured: true, enabled: false, webhook_overridden: false } });
       if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
       if (path === "/api/inbox")
@@ -273,7 +274,7 @@ describe("WatchWeaver dashboard", () => {
   it("submits exact canonical rating values", async () => {
     render(<App />);
     await screen.findByText("The Example");
-    fireEvent.click(screen.getByTitle("4.5 stars"));
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "9" } });
     fireEvent.click(screen.getByRole("button", { name: "Save & complete" }));
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
@@ -306,7 +307,7 @@ describe("WatchWeaver dashboard", () => {
     await screen.findByText("A Standout Episode");
     expect(screen.queryByLabelText("Review for A Standout Episode")).not.toBeInTheDocument();
     expect(screen.getByText(/Add an optional episode review from History/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("4.5 stars"));
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "9" } });
     fireEvent.click(screen.getByRole("button", { name: "Save & complete" }));
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
@@ -323,7 +324,7 @@ describe("WatchWeaver dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /History/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Rate or review" }));
     expect(await screen.findByText(/included in your next Letterboxd CSV/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("4.5 stars"));
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "9" } });
     fireEvent.change(screen.getByLabelText("Review for This movie"), { target: { value: "Excellent." } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/media/9/rating", expect.objectContaining({ method: "PUT", body: JSON.stringify({ rating: 9 }) })));
@@ -345,10 +346,21 @@ describe("WatchWeaver dashboard", () => {
 		render(<App />);
 		await screen.findByText("The Example");
 		fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /Local push/ }));
 		fireEvent.click(await screen.findByRole("button", { name: "Generate token" }));
 		expect(await screen.findByText("one-time-jellyfin-token")).toBeInTheDocument();
 		await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/integrations/jellyfin", expect.objectContaining({ method: "POST" })));
 	});
+  it("shows only the selected Jellyfin connection method", async () => {
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    expect(await screen.findByLabelText("Jellyfin URL")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate token" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Local push/ }));
+    expect(screen.queryByLabelText("Jellyfin URL")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate token" })).toBeInTheDocument();
+  });
   it("keeps connected Trakt credentials collapsed until explicitly edited", async () => {
     render(<App />);
     await screen.findByText("The Example");
