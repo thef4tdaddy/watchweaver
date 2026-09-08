@@ -47,3 +47,28 @@ textarea,input{background:#020617;color:var(--ink)}
 .status-group{margin-top:28px}.status-group-heading h2{margin-top:4px;font-size:18px}.review-transfer-section{margin-top:32px}.review-transfer-list{display:grid;gap:14px}.review-transfer-list blockquote{margin:14px 0;padding:14px;border-left:3px solid var(--cyan);background:#0f172a;color:#e2e8f0;white-space:pre-wrap}.inline-check{display:flex!important;grid-auto-flow:column;align-items:center;gap:8px!important;margin:0!important;font-weight:600!important}.inline-check input{width:auto}.status-group .settings-grid{align-items:stretch}
 .credential-fields,.discord-settings{margin-top:18px;padding-top:4px}.settings-actions{display:flex;gap:10px;flex-wrap:wrap}.success-message{color:#a5f3fc;font-size:13px;font-weight:700}.settings-message{grid-column:1/-1;margin:0;padding:12px 14px;border:1px solid #22d3ee;border-radius:10px;background:#164e63}
 .credential-toggle{margin-top:18px}
+
+/* Compact, continuous half-star rating control. */
+.rating-row{display:flex;align-items:center;gap:14px;margin:14px 0}
+.star-picker{position:relative;display:block;width:176px;height:34px;touch-action:pan-y;user-select:none;isolation:isolate}
+.star-track,.star-picker>.star-fill{position:absolute;inset:0 auto 0 0;display:block;white-space:nowrap;font-size:32px;line-height:34px;letter-spacing:3px;pointer-events:none}
+.star-track{color:#334155}
+.star-picker>.star-fill{color:var(--cyan);overflow:hidden;filter:drop-shadow(0 0 5px #2563eb99)}
+.star-picker input[type="range"]{position:absolute;z-index:2;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;cursor:pointer}
+.star-picker:focus-within{border-radius:6px;outline:2px solid var(--cyan);outline-offset:4px}
+.rating-row>b{min-width:64px;margin:0;font-size:12px;color:var(--muted);font-weight:700}
+.rating-row>b strong{color:var(--ink);font-size:18px}.rating-row>b span{font-weight:600}
+
+/* Show one Jellyfin connection method at a time. */
+.jellyfin-card{grid-column:1/-1}
+.jellyfin-summary{max-width:760px;color:var(--muted);margin-bottom:16px}
+.connection-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:620px;padding:4px;background:#020617;border:1px solid var(--line);border-radius:12px}
+.connection-tabs button{display:grid;gap:2px;text-align:left;border:1px solid transparent;border-radius:8px;padding:11px 14px;background:transparent;color:var(--muted)}
+.connection-tabs button.active{color:var(--ink);border-color:#4338ca;background:linear-gradient(135deg,#2e1065aa,#172554)}
+.connection-tabs small{font-size:11px;font-weight:500;color:var(--muted)}
+.jellyfin-method{max-width:900px;margin-top:14px;padding-top:2px}
+.jellyfin-method>p{color:var(--muted);margin:8px 0 2px}
+.jellyfin-fields label{margin:12px 0}
+.connection-info.compact{margin:12px 0;gap:5px}
+.jellyfin-method .override-note{max-width:700px;margin-top:14px}
+@media(max-width:650px){.connection-tabs,.jellyfin-fields{grid-template-columns:1fr}.star-picker{width:160px}.star-track,.star-picker>.star-fill{font-size:29px;letter-spacing:2px}}
