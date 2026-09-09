@@ -356,6 +356,8 @@ function TimezoneSelector({value,onChange}:{value:string;onChange:(value:string)
 function mediaLabel(media: Task["media"]) {
   if (media.type === "episode")
     return `${media.show_title} · S${media.season_number} E${media.episode_number}`;
+	if (media.type === "season" && media.show_title)
+		return `${media.show_title} · Season ${media.season_number}`;
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 

@@ -408,7 +408,10 @@ func attachIDs(ctx context.Context, tx *sql.Tx, id int64, jp, jid string, ids ma
 		}
 	}
 	for p, x := range pairs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,?,?) ON CONFLICT(provider,external_id) DO NOTHING`, id, p, x); err != nil {
+		// Either uniqueness rule can already be satisfied: a provider/external ID
+		// may identify another canonical item, or this media item may already have
+		// a value for the provider. Neither should abort ingestion of the watch.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,?,?) ON CONFLICT DO NOTHING`, id, p, x); err != nil {
 			return err
 		}
 	}

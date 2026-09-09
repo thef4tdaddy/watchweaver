@@ -186,6 +186,10 @@ func (m *Manager) consume(ctx context.Context, cfg Config) error {
 		}
 		result, err := m.accept.Accept(ctx, event)
 		if err != nil {
+			if errors.Is(err, jellyfin.ErrInvalidEvent) || errors.Is(err, jellyfin.ErrEventConflict) {
+				log.Printf("Jellyfin remote event rejected without closing stream: event_id=%q reason=%s", event.EventID, safeError(err))
+				return nil
+			}
 			return fmt.Errorf("accept Jellyfin stream event: %w", err)
 		}
 		now := time.Now().UTC()

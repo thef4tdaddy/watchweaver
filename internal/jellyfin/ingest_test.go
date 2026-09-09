@@ -114,6 +114,27 @@ func TestProviderlessEpisodesUseExplicitSeriesAndSeasonIdentity(t *testing.T) {
 	}
 }
 
+func TestConflictingSecondaryProviderDoesNotRejectWatch(t *testing.T) {
+	svc := testService(t)
+	first := movieEvent()
+	first.Item.ProviderIDs = map[string]string{"tmdb": "123", "imdb": "tt-old"}
+	if _, err := svc.Accept(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	second := movieEvent()
+	second.EventID = "event-2"
+	second.OccurredAt = "2026-09-04T15:00:00Z"
+	second.Item.ID = "jf-movie-2"
+	second.Item.ProviderIDs = map[string]string{"tmdb": "123", "imdb": "tt-new"}
+	if _, err := svc.Accept(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	var watches int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM watch_events WHERE source='jellyfin'`).Scan(&watches); err != nil || watches != 2 {
+		t.Fatalf("watches=%d err=%v", watches, err)
+	}
+}
+
 func TestConcurrentDuplicateDeliveryReturnsSuccess(t *testing.T) {
 	svc := testService(t)
 	start := make(chan struct{})
