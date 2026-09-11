@@ -50,6 +50,10 @@ func TestAcceptMovieIsIdempotent(t *testing.T) {
 	if err := svc.db.QueryRow(`SELECT source_instance_name FROM watch_events`).Scan(&instance); err != nil || instance != "Seedbox Jellyfin" {
 		t.Fatalf("source instance=%q err=%v", instance, err)
 	}
+	status, err := svc.Status(context.Background(), true)
+	if err != nil || len(status.ServerNames) != 1 || status.ServerNames[0] != "Seedbox Jellyfin" {
+		t.Fatalf("server names=%v err=%v", status.ServerNames, err)
+	}
 	if watches != 1 || ingests != 1 {
 		t.Fatalf("watches=%d ingests=%d", watches, ingests)
 	}
