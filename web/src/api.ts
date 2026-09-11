@@ -112,6 +112,7 @@ export type Integrations = {
 		auth_failure_count: number;
 		last_accepted_at?: string;
 		last_server_version?: string;
+		last_server_name?: string;
 		last_plugin_version?: string;
 		last_rejection_at?: string;
 		last_rejection_code?: string;
@@ -119,6 +120,7 @@ export type Integrations = {
 		last_probe_at?: string;
 		last_probe_server_version?: string;
 		last_probe_plugin_version?: string;
+		server_names?: string[];
 	};
   letterboxd: { enabled: boolean; status: string };
   serializd: { enabled: boolean; status: string };

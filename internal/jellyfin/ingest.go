@@ -80,19 +80,21 @@ type Result struct {
 	ProtocolVersion int   `json:"protocol_version"`
 }
 type Status struct {
-	Configured             bool    `json:"configured"`
-	ProtocolVersion        int     `json:"protocol_version"`
-	AcceptedCount          int64   `json:"accepted_count"`
-	AuthFailureCount       int64   `json:"auth_failure_count"`
-	LastAcceptedAt         *string `json:"last_accepted_at,omitempty"`
-	LastServerVersion      *string `json:"last_server_version,omitempty"`
-	LastPluginVersion      *string `json:"last_plugin_version,omitempty"`
-	LastRejectionAt        *string `json:"last_rejection_at,omitempty"`
-	LastRejectionCode      *string `json:"last_rejection_code,omitempty"`
-	LastAuthFailureAt      *string `json:"last_auth_failure_at,omitempty"`
-	LastProbeAt            *string `json:"last_probe_at,omitempty"`
-	LastProbeServerVersion *string `json:"last_probe_server_version,omitempty"`
-	LastProbePluginVersion *string `json:"last_probe_plugin_version,omitempty"`
+	Configured             bool     `json:"configured"`
+	ProtocolVersion        int      `json:"protocol_version"`
+	AcceptedCount          int64    `json:"accepted_count"`
+	AuthFailureCount       int64    `json:"auth_failure_count"`
+	LastAcceptedAt         *string  `json:"last_accepted_at,omitempty"`
+	LastServerVersion      *string  `json:"last_server_version,omitempty"`
+	LastServerName         *string  `json:"last_server_name,omitempty"`
+	LastPluginVersion      *string  `json:"last_plugin_version,omitempty"`
+	LastRejectionAt        *string  `json:"last_rejection_at,omitempty"`
+	LastRejectionCode      *string  `json:"last_rejection_code,omitempty"`
+	LastAuthFailureAt      *string  `json:"last_auth_failure_at,omitempty"`
+	LastProbeAt            *string  `json:"last_probe_at,omitempty"`
+	LastProbeServerVersion *string  `json:"last_probe_server_version,omitempty"`
+	LastProbePluginVersion *string  `json:"last_probe_plugin_version,omitempty"`
+	ServerNames            []string `json:"server_names"`
 }
 type Service struct{ db *sql.DB }
 
@@ -146,7 +148,7 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE jellyfin_ingest_status SET accepted_count=accepted_count+1,last_accepted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_server_version=?,last_plugin_version=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton=1`, trim(e.Server.Version), trim(e.Plugin.Version))
+	_, err = tx.ExecContext(ctx, `UPDATE jellyfin_ingest_status SET accepted_count=accepted_count+1,last_accepted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_server_version=?,last_server_name=NULLIF(?,''),last_plugin_version=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton=1`, trim(e.Server.Version), trim(e.Server.Name), trim(e.Plugin.Version))
 	if err != nil {
 		return Result{}, err
 	}
@@ -209,18 +211,35 @@ func (s *Service) RecordProbe(ctx context.Context, serverVersion, pluginVersion 
 }
 func (s *Service) Status(ctx context.Context, configured bool) (Status, error) {
 	out := Status{Configured: configured, ProtocolVersion: 1}
-	var a, b, c, d, e, f, g, h, i sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT accepted_count,auth_failure_count,last_accepted_at,last_server_version,last_plugin_version,last_rejection_at,last_rejection_code,last_auth_failure_at,last_probe_at,last_probe_server_version,last_probe_plugin_version FROM jellyfin_ingest_status WHERE singleton=1`).Scan(&out.AcceptedCount, &out.AuthFailureCount, &a, &b, &c, &d, &e, &f, &g, &h, &i)
+	var a, b, c, d, e, f, g, h, i, j sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT accepted_count,auth_failure_count,last_accepted_at,last_server_version,last_server_name,last_plugin_version,last_rejection_at,last_rejection_code,last_auth_failure_at,last_probe_at,last_probe_server_version,last_probe_plugin_version FROM jellyfin_ingest_status WHERE singleton=1`).Scan(&out.AcceptedCount, &out.AuthFailureCount, &a, &b, &c, &d, &e, &f, &g, &h, &i, &j)
 	if err != nil {
 		return Status{}, err
 	}
 	out.LastAcceptedAt = nullable(a)
 	out.LastServerVersion = nullable(b)
-	out.LastPluginVersion = nullable(c)
-	out.LastRejectionAt = nullable(d)
-	out.LastRejectionCode = nullable(e)
-	out.LastAuthFailureAt = nullable(f)
-	out.LastProbeAt, out.LastProbeServerVersion, out.LastProbePluginVersion = nullable(g), nullable(h), nullable(i)
+	out.LastServerName = nullable(c)
+	out.LastPluginVersion = nullable(d)
+	out.LastRejectionAt = nullable(e)
+	out.LastRejectionCode = nullable(f)
+	out.LastAuthFailureAt = nullable(g)
+	out.LastProbeAt, out.LastProbeServerVersion, out.LastProbePluginVersion = nullable(h), nullable(i), nullable(j)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT source_instance_name FROM watch_events WHERE source='jellyfin' AND source_instance_name IS NOT NULL AND trim(source_instance_name)<>'' ORDER BY source_instance_name`)
+	if err != nil {
+		return Status{}, err
+	}
+	defer rows.Close()
+	out.ServerNames = make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return Status{}, err
+		}
+		out.ServerNames = append(out.ServerNames, name)
+	}
+	if err := rows.Err(); err != nil {
+		return Status{}, err
+	}
 	return out, nil
 }
 func nullable(v sql.NullString) *string {

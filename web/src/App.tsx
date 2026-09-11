@@ -330,7 +330,7 @@ function getJellyfinState(value?: Integrations["jellyfin"], remote?: JellyfinRem
   const probed = value.last_probe_at ? Date.parse(value.last_probe_at) : 0;
   const authFailure = value.last_auth_failure_at ? Date.parse(value.last_auth_failure_at) : 0;
   if (Math.max(rejected, authFailure) > Math.max(accepted, probed)) return { ok: false, label: "Needs attention", detail: "Jellyfin plugin → WatchWeaver" };
-  if (accepted) return { ok: true, label: "Receiving", detail: "Jellyfin plugin → WatchWeaver" };
+  if (accepted) return { ok: true, label: "Receiving", detail: ["Jellyfin plugin → WatchWeaver", ...(value.server_names || [])].join(" · ") };
   if (probed) return { ok: true, label: "Connected · waiting", detail: "Jellyfin plugin → WatchWeaver" };
   return { ok: true, label: "Ready", detail: "Jellyfin plugin → WatchWeaver" };
 }
