@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -18,13 +20,14 @@ var ErrSyncInProgress = errors.New("trakt sync is already running")
 const finaleReconciliationWindow = 30 * 24 * time.Hour
 
 type SyncManagerOptions struct {
-	BaseURL, ClientID string
-	HTTPClient        *http.Client
-	AccessToken       func(context.Context) (string, error)
-	ClientIDProvider  func(context.Context) (string, error)
-	Interval          func(context.Context) time.Duration
-	Overlap           time.Duration
-	Now               func() time.Time
+	BaseURL, ClientID    string
+	HTTPClient           *http.Client
+	AccessToken          func(context.Context) (string, error)
+	RefreshAuthorization func(context.Context) error
+	ClientIDProvider     func(context.Context) (string, error)
+	Interval             func(context.Context) time.Duration
+	Overlap              time.Duration
+	Now                  func() time.Time
 }
 
 type SyncResult struct {
@@ -130,6 +133,15 @@ func (m *SyncManager) SyncNow(ctx context.Context) error {
 	_ = m.set(ctx, "sync_last_started", started.Format(time.RFC3339Nano))
 	_ = m.set(ctx, "history_sync_phase", "syncing")
 	result, err := m.cycle(ctx, started)
+	if isUnauthorized(err) && m.options.RefreshAuthorization != nil {
+		log.Printf("Trakt access token rejected; refreshing authorization")
+		if refreshErr := m.options.RefreshAuthorization(ctx); refreshErr != nil {
+			err = fmt.Errorf("Trakt authorization refresh failed; reconnect Trakt in Settings: %w", refreshErr)
+		} else {
+			log.Printf("Trakt authorization refreshed; retrying sync")
+			result, err = m.cycle(ctx, started)
+		}
+	}
 	if err != nil {
 		log.Printf("Trakt sync failed after %s: %v", time.Since(started).Round(time.Millisecond), err)
 		_ = m.set(ctx, "sync_last_error", err.Error())
@@ -150,6 +162,10 @@ func (m *SyncManager) SyncNow(ctx context.Context) error {
 	}
 	log.Printf("Trakt sync completed in %s: history_changes=%d rating_changes=%d pending_ratings_completed=%d pending_ratings_remaining=%d", time.Since(started).Round(time.Millisecond), result.HistoryChanges, result.RatingChanges, result.PendingRatingsCompleted, result.PendingRatingsRemaining)
 	return m.set(ctx, "history_sync_phase", "polling")
+}
+
+func isUnauthorized(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "HTTP 401")
 }
 
 func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult, error) {

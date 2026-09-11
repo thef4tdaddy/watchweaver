@@ -37,6 +37,7 @@ function App() {
   const [view, setView] = useState<View>("inbox");
   const [inboxCount, setInboxCount] = useState(0);
   const [integrations, setIntegrations] = useState<Integrations>();
+  const [jellyfinRemote, setJellyfinRemote] = useState<JellyfinRemote>();
   const [error, setError] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>();
   const refreshIntegrations = useCallback(
@@ -47,24 +48,27 @@ function App() {
     [],
   );
   const refreshUpdate = useCallback(() => request<UpdateStatus>("/api/update").then(setUpdateStatus).catch(() => undefined), []);
+  const refreshJellyfinRemote = useCallback(() => request<JellyfinRemote>("/api/integrations/jellyfin/remote").then(setJellyfinRemote).catch(() => undefined), []);
   const refreshInboxCount = useCallback(
     () => request<Page<Task>>("/api/inbox").then((data) => setInboxCount(data.total)).catch(() => undefined),
     [],
   );
   useEffect(() => {
     void refreshIntegrations();
+    void refreshJellyfinRemote();
     void refreshUpdate();
     void refreshInboxCount();
-  }, [refreshInboxCount, refreshIntegrations, refreshUpdate]);
+  }, [refreshInboxCount, refreshIntegrations, refreshJellyfinRemote, refreshUpdate]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       void refreshIntegrations();
+      void refreshJellyfinRemote();
       void refreshInboxCount();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [refreshInboxCount, refreshIntegrations]);
-  const traktConnected = integrations?.trakt.authorization.status === "connected";
-  const jellyfinState = getJellyfinState(integrations?.jellyfin);
+  }, [refreshInboxCount, refreshIntegrations, refreshJellyfinRemote]);
+  const traktState = getTraktState(integrations?.trakt);
+  const jellyfinState = getJellyfinState(integrations?.jellyfin, jellyfinRemote);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -93,11 +97,12 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <StatusDot ok={traktConnected} label={`Trakt · ${traktConnected ? "Connected" : "Not connected"}`} />
-          <StatusDot ok={jellyfinState.ok} label={`Jellyfin · ${jellyfinState.label}`} />
+          <StatusDot ok={traktState.ok} tone="trakt" label={`Trakt · ${traktState.label}`} />
+          <StatusDot ok={jellyfinState.ok} tone="jellyfin" label={`Jellyfin · ${jellyfinState.label}`} detail={jellyfinState.detail} />
           <small className="version-label">Version {updateStatus?.running_version || buildVersion}</small>
           <StatusDot
             ok={integrations?.discord.enabled === true}
+            tone="discord"
             label={`Discord · ${integrations?.discord.enabled ? "On" : "Off"}`}
           />
         </div>
@@ -301,24 +306,33 @@ function actionLabel(action?: string) {
   );
 }
 
-function StatusDot({ ok, label }: { ok: boolean; label: string }) {
+function StatusDot({ ok, label, detail, tone }: { ok: boolean; label: string; detail?: string; tone?: string }) {
   return (
-    <div className="status-dot">
+    <div className={`status-dot ${tone ? `provider-${tone}` : ""} ${ok ? "active" : ""}`}>
       <span className={ok ? "ok" : ""} />
-      {label}
+      <div>{label}{detail && <small>{detail}</small>}</div>
     </div>
   );
 }
-function getJellyfinState(value?: Integrations["jellyfin"]) {
-  if (!value?.configured) return { ok: false, label: "Not configured" };
+function getTraktState(value?: Integrations["trakt"]) {
+  const authError = `${value?.sync.last_error || ""} ${value?.poll.last_error || ""}`.includes("HTTP 401");
+  if (authError) return { ok: false, label: "Reconnect required" };
+  const connected = value?.authorization.status === "connected";
+  return { ok: connected, label: connected ? "Connected" : "Not connected" };
+}
+function getJellyfinState(value?: Integrations["jellyfin"], remote?: JellyfinRemote) {
+  if (remote?.configured && remote.enabled) return remote.connected
+    ? { ok: true, label: "Connected", detail: "WatchWeaver → Jellyfin" }
+    : { ok: false, label: "Reconnecting", detail: "WatchWeaver → Jellyfin" };
+  if (!value?.configured) return { ok: false, label: "Not configured", detail: "Choose a connection mode" };
   const rejected = value.last_rejection_at ? Date.parse(value.last_rejection_at) : 0;
   const accepted = value.last_accepted_at ? Date.parse(value.last_accepted_at) : 0;
   const probed = value.last_probe_at ? Date.parse(value.last_probe_at) : 0;
   const authFailure = value.last_auth_failure_at ? Date.parse(value.last_auth_failure_at) : 0;
-  if (Math.max(rejected, authFailure) > Math.max(accepted, probed)) return { ok: false, label: "Needs attention" };
-  if (accepted) return { ok: true, label: "Receiving" };
-  if (probed) return { ok: true, label: "Connected · waiting" };
-  return { ok: true, label: "Ready" };
+  if (Math.max(rejected, authFailure) > Math.max(accepted, probed)) return { ok: false, label: "Needs attention", detail: "Jellyfin plugin → WatchWeaver" };
+  if (accepted) return { ok: true, label: "Receiving", detail: "Jellyfin plugin → WatchWeaver" };
+  if (probed) return { ok: true, label: "Connected · waiting", detail: "Jellyfin plugin → WatchWeaver" };
+  return { ok: true, label: "Ready", detail: "Jellyfin plugin → WatchWeaver" };
 }
 function humanStatus(value?: string) {
   if (value === "needs_attention") return "Action needed";
