@@ -361,6 +361,12 @@ function mediaLabel(media: Task["media"]) {
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 
+function historySource(source: string) {
+	if (source === "jellyfin") return { label: "Jellyfin direct", detail: "Received directly from the WatchWeaver Jellyfin plugin" };
+	if (source === "trakt") return { label: "Trakt", detail: "Received from Trakt, including activity Trakt may have received from another app" };
+	return { label: source || "Unknown", detail: "Recorded by WatchWeaver from this source" };
+}
+
 async function copyToClipboard(value: string) {
 	if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
 	const field = document.createElement("textarea");
@@ -599,8 +605,9 @@ function History({ onError }: { onError: (v: string) => void }) {
         />
       ) : (
         <div className="timeline">
-          {data.items.map((item) => (
-            <article key={item.id}>
+          {data.items.map((item) => {
+            const source = historySource(item.source);
+            return <article key={item.id}>
               <div className="timeline-date">
                 <strong>
                   {new Date(item.watched_at).toLocaleDateString(undefined, {
@@ -612,7 +619,10 @@ function History({ onError }: { onError: (v: string) => void }) {
               </div>
               <span className="timeline-line" />
               <div className="history-card">
-                <span className="tag">{item.media.type}</span>
+                <div className="history-tags">
+                  <span className="tag">{item.media.type}</span>
+                  <span className={`source-badge source-${item.source}`} aria-label={`Tracking source: ${source.label}`} title={source.detail}>{source.label}</span>
+                </div>
                 <h3>{item.media.title}</h3>
                 <p>
                   {item.media.show_title
@@ -625,8 +635,8 @@ function History({ onError }: { onError: (v: string) => void }) {
                 </button>
                 {editing === item.id && <HistoryEditor item={item} onError={onError} />}
               </div>
-            </article>
-          ))}
+            </article>;
+          })}
         </div>
       )}
       <Pager page={data.page} pages={data.total_pages} setPage={setPageNo} />
