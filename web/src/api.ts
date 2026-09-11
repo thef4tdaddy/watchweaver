@@ -21,6 +21,7 @@ export type HistoryItem = {
   id: number;
   source: string;
   source_event_id?: string;
+  source_instance?: string;
   watched_at: string;
   media: Media;
 };

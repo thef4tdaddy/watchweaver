@@ -22,7 +22,7 @@ func testService(t *testing.T) *Service {
 
 func movieEvent() Event {
 	year := 2026
-	return Event{SchemaVersion: 1, EventID: "event-1", EventType: "played", OccurredAt: "2026-09-03T15:00:00Z", Server: Server{ID: "server-a", Version: "10.11.0"}, Plugin: Plugin{Version: "0.1.0", TargetABI: "10.11.0.0"}, User: User{ID: "user-1"}, Item: Item{ID: "jf-movie-1", Type: "movie", Title: "Movie", Year: &year, ProviderIDs: map[string]string{"tmdb": "123", "imdb": "tt123"}}, Playback: Playback{Played: true}}
+	return Event{SchemaVersion: 1, EventID: "event-1", EventType: "played", OccurredAt: "2026-09-03T15:00:00Z", Server: Server{ID: "server-a", Version: "10.11.0", Name: "Seedbox Jellyfin"}, Plugin: Plugin{Version: "0.1.0", TargetABI: "10.11.0.0"}, User: User{ID: "user-1"}, Item: Item{ID: "jf-movie-1", Type: "movie", Title: "Movie", Year: &year, ProviderIDs: map[string]string{"tmdb": "123", "imdb": "tt123"}}, Playback: Playback{Played: true}}
 }
 
 func TestAcceptMovieIsIdempotent(t *testing.T) {
@@ -45,6 +45,10 @@ func TestAcceptMovieIsIdempotent(t *testing.T) {
 	}
 	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM jellyfin_ingest_events`).Scan(&ingests); err != nil {
 		t.Fatal(err)
+	}
+	var instance string
+	if err := svc.db.QueryRow(`SELECT source_instance_name FROM watch_events`).Scan(&instance); err != nil || instance != "Seedbox Jellyfin" {
+		t.Fatalf("source instance=%q err=%v", instance, err)
 	}
 	if watches != 1 || ingests != 1 {
 		t.Fatalf("watches=%d ingests=%d", watches, ingests)

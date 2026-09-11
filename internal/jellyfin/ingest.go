@@ -36,6 +36,7 @@ type Event struct {
 type Server struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
+	Name    string `json:"name,omitempty"`
 }
 type Plugin struct {
 	Version   string `json:"version"`
@@ -133,7 +134,7 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	}
 	occurred, _ := time.Parse(time.RFC3339Nano, e.OccurredAt)
 	canonical := occurred.UTC().Format(time.RFC3339Nano)
-	res, err := tx.ExecContext(ctx, `INSERT INTO watch_events(media_id,source,source_event_id,watched_at_utc,source_watched_at,is_baseline) VALUES(?,'jellyfin',?,?,?,0)`, mediaID, trim(e.Server.ID)+":"+trim(e.EventID), canonical, trim(e.OccurredAt))
+	res, err := tx.ExecContext(ctx, `INSERT INTO watch_events(media_id,source,source_event_id,watched_at_utc,source_watched_at,is_baseline,source_instance_name) VALUES(?,'jellyfin',?,?,?,0,NULLIF(?,''))`, mediaID, trim(e.Server.ID)+":"+trim(e.EventID), canonical, trim(e.OccurredAt), trim(e.Server.Name))
 	if err != nil {
 		return Result{}, err
 	}
