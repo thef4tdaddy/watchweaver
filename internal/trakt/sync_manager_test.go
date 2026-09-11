@@ -67,6 +67,43 @@ func TestSyncManagerReportsRetryAndRejectsConcurrentRun(t *testing.T) {
 	}
 }
 
+func TestSyncManagerRefreshesUnauthorizedTokenOnce(t *testing.T) {
+	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "sync-manager-refresh.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	token := "expired"
+	refreshCalls := 0
+	freshRequests := 0
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer expired" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		freshRequests++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Pagination-Page-Count", "1")
+		fmt.Fprint(w, `[]`)
+	}))
+	defer remote.Close()
+	manager := NewSyncManager(db, SyncManagerOptions{
+		BaseURL: remote.URL, HTTPClient: remote.Client(), ClientID: "client",
+		AccessToken: func(context.Context) (string, error) { return token, nil },
+		RefreshAuthorization: func(context.Context) error {
+			refreshCalls++
+			token = "fresh"
+			return nil
+		},
+	})
+	if err := manager.SyncNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if refreshCalls != 1 || freshRequests == 0 {
+		t.Fatalf("refresh calls=%d fresh requests=%d", refreshCalls, freshRequests)
+	}
+}
+
 func TestSyncManagerWaitsOnlyForRemainingIntervalAfterRestart(t *testing.T) {
 	db, err := persistence.OpenAndMigrate(persistence.Options{Path: filepath.Join(t.TempDir(), "sync-manager.db")})
 	if err != nil {

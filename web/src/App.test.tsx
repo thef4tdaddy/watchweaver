@@ -7,9 +7,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Task } from "./api";
+import type { Integrations, Task } from "./api";
 
-const integrations = {
+const integrations: Integrations = {
   trakt: {
     authorization: { status: "connected" },
     poll: { phase: "polling", consecutive_failures: 0 },
@@ -49,6 +49,7 @@ const task: Task = {
 let activeTask: Task | undefined = task;
 let serializdReviews: Array<Record<string, unknown>> = [];
 let historyTrackingSource = "trakt";
+let currentJellyfinRemote = { configured: false, enabled: false, connected: false, reconnect_count: 0, events_received: 0, protocol_version: 1 };
 function json(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -62,13 +63,14 @@ beforeEach(() => {
   activeTask = task;
   serializdReviews = [];
   historyTrackingSource = "trakt";
+  currentJellyfinRemote = { configured: false, enabled: false, connected: false, reconnect_count: 0, events_received: 0, protocol_version: 1 };
   currentIntegrations = integrations;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/integrations") return json(currentIntegrations);
-      if (path === "/api/integrations/jellyfin/remote") return json({ configured: true, enabled: true, url: "https://jellyfin.example", connected: true, reconnect_count: 0, events_received: 2, protocol_version: 1 });
+      if (path === "/api/integrations/jellyfin/remote") return json(currentJellyfinRemote);
       if (path === "/api/setup") return json({ complete: true, encrypted_storage: true, trakt: { configured: true, authorization_status: "connected", client_id_overridden: false, client_secret_overridden: false }, discord: { configured: true, enabled: false, webhook_overridden: false } });
       if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
       if (path === "/api/inbox")
@@ -436,12 +438,22 @@ describe("WatchWeaver dashboard", () => {
     currentIntegrations = {
       ...integrations,
       trakt: { ...integrations.trakt, authorization: { status: "not_configured" } },
-      jellyfin: { ...integrations.jellyfin, configured: true },
+      jellyfin: { ...integrations.jellyfin!, configured: true },
     };
     activeTask = undefined;
     render(<App />);
     expect(await screen.findByText("Jellyfin · Ready")).toBeInTheDocument();
+    expect(screen.getByText("Jellyfin plugin → WatchWeaver")).toBeInTheDocument();
     expect(await screen.findByText(/after watch activity is processed/)).toBeInTheDocument();
+  });
+  it("shows provider colors, Jellyfin direction, and expired Trakt authorization", async () => {
+    currentJellyfinRemote = { configured: true, enabled: true, connected: true, reconnect_count: 0, events_received: 2, protocol_version: 1 };
+    currentIntegrations = { ...integrations, trakt: { ...integrations.trakt, sync: { ...integrations.trakt.sync, last_error: "fetch trakt history: HTTP 401" } }, discord: { enabled: true, status: "enabled" } };
+    render(<App />);
+    expect(await screen.findByText("Trakt · Reconnect required")).toBeInTheDocument();
+    expect(screen.getByText("Jellyfin · Connected")).toBeInTheDocument();
+    expect(screen.getByText("WatchWeaver → Jellyfin")).toBeInTheDocument();
+    expect(screen.getByText("Discord · On").closest(".status-dot")).toHaveClass("provider-discord", "active");
   });
   it("copies and durably confirms Serializd television reviews", async () => {
     serializdReviews = [{ review_id: 7, media_id: 12, media_type: "episode", title: "Finale", show_title: "Silo", season_number: 3, episode_number: 10, rating: 9, body: "That ending.", review_updated_at: "2026-09-05T10:00:00Z" }];

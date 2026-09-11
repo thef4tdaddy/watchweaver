@@ -103,13 +103,13 @@ func (s *Service) status(ctx context.Context) PublicStatus {
 	if s.pending != nil {
 		return PublicStatus{Status: StatusPending, UserCode: s.pending.UserCode, VerificationURL: s.pending.VerificationURL, PollAfterSeconds: s.pending.Interval}
 	}
-	access, err := s.secret(ctx, "access_token")
-	if err == nil && access != "" {
-		return PublicStatus{Status: StatusConnected}
-	}
 	var reauth string
 	if err := s.db.QueryRowContext(ctx, `SELECT state_value FROM integration_state WHERE integration='trakt' AND state_key='reauth_required'`).Scan(&reauth); err == nil && reauth == "1" {
 		return PublicStatus{Status: StatusReauth}
+	}
+	access, err := s.secret(ctx, "access_token")
+	if err == nil && access != "" {
+		return PublicStatus{Status: StatusConnected}
 	}
 	return PublicStatus{Status: StatusNotAuthorized}
 }

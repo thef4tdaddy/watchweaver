@@ -40,6 +40,11 @@ func TestStatusStatesAndSecretRedaction(t *testing.T) {
 	}
 	_, _ = db.Exec(`INSERT INTO integration_state(integration,state_key,state_value) VALUES('trakt','access_token','ACCESS')`)
 	st := s.Status(ctx)
+	if st.Status != StatusReauth {
+		t.Fatalf("got %s", st.Status)
+	}
+	_, _ = db.Exec(`UPDATE integration_state SET state_value='0' WHERE integration='trakt' AND state_key='reauth_required'`)
+	st = s.Status(ctx)
 	if st.Status != StatusConnected {
 		t.Fatalf("got %s", st.Status)
 	}
@@ -148,10 +153,6 @@ func TestRefreshSuccessAndFailureRequiresReauth(t *testing.T) {
 	if err := s.Refresh(ctx); err == nil {
 		t.Fatal("expected refresh failure")
 	}
-	if s.Status(ctx).Status != StatusConnected { // existing token remains locally usable until callers decide it is expired
-		t.Fatalf("unexpected status %s", s.Status(ctx).Status)
-	}
-	_, _ = db.Exec(`DELETE FROM integration_state WHERE integration='trakt' AND state_key='access_token'`)
 	if s.Status(ctx).Status != StatusReauth {
 		t.Fatalf("expected reauth, got %s", s.Status(ctx).Status)
 	}

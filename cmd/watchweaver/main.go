@@ -88,8 +88,9 @@ func main() {
 	traktService := trakt.NewService(db, trakt.Config{ClientID: traktClientID, ClientSecret: traktClientSecret, BaseURL: cfg.TraktBaseURL, SecretStore: credentialStore})
 	traktSync := trakt.NewSyncManager(db, trakt.SyncManagerOptions{
 		BaseURL: cfg.TraktBaseURL, ClientID: traktClientID, Overlap: cfg.TraktPollOverlap,
-		AccessToken:      func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "access_token") },
-		ClientIDProvider: func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "client_id") },
+		AccessToken:          func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "access_token") },
+		RefreshAuthorization: traktService.Refresh,
+		ClientIDProvider:     func(ctx context.Context) (string, error) { return credentialStore.Get(ctx, "trakt", "client_id") },
 		Interval: func(ctx context.Context) time.Duration {
 			return applicationPollInterval(ctx, db, cfg.TraktPollInterval)
 		},
