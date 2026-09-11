@@ -79,6 +79,7 @@ type historyJSON struct {
 	ID              int64     `json:"id"`
 	Source          string    `json:"source"`
 	SourceEventID   *string   `json:"source_event_id,omitempty"`
+	SourceInstance  *string   `json:"source_instance,omitempty"`
 	WatchedAt       string    `json:"watched_at"`
 	SourceWatchedAt string    `json:"source_watched_at"`
 	Media           mediaJSON `json:"media"`
@@ -386,7 +387,7 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT w.id,w.source,w.source_event_id,w.watched_at_utc,w.source_watched_at,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,CASE WHEN m.media_type='episode' THEN p.id END,
+	rows, err := a.db.QueryContext(r.Context(), `SELECT w.id,w.source,w.source_event_id,w.source_instance_name,w.watched_at_utc,w.source_watched_at,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,CASE WHEN m.media_type='episode' THEN p.id END,
 		CASE WHEN m.media_type='season' THEN p.title WHEN m.media_type='episode' THEN gp.title ELSE '' END
 		FROM watch_events w JOIN media_items m ON m.id=w.media_id LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id
 		WHERE w.deleted_at IS NULL ORDER BY w.watched_at_utc DESC,w.id DESC LIMIT ? OFFSET ?`, perPage, (page-1)*perPage)
@@ -398,15 +399,18 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 	items := make([]historyJSON, 0)
 	for rows.Next() {
 		var item historyJSON
-		var sourceID, year sql.NullString
+		var sourceID, sourceInstance, year sql.NullString
 		var season, episode sql.NullInt64
 		var seasonID sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.Source, &sourceID, &item.WatchedAt, &item.SourceWatchedAt, &item.Media.ID, &item.Media.Type, &item.Media.Title, &year, &season, &episode, &seasonID, &item.Media.ShowTitle); err != nil {
+		if err := rows.Scan(&item.ID, &item.Source, &sourceID, &sourceInstance, &item.WatchedAt, &item.SourceWatchedAt, &item.Media.ID, &item.Media.Type, &item.Media.Title, &year, &season, &episode, &seasonID, &item.Media.ShowTitle); err != nil {
 			internalError(w)
 			return
 		}
 		if sourceID.Valid {
 			item.SourceEventID = &sourceID.String
+		}
+		if sourceInstance.Valid {
+			item.SourceInstance = &sourceInstance.String
 		}
 		setOptionalMediaFields(&item.Media, year, season, episode)
 		if seasonID.Valid {

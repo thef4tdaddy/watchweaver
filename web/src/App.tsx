@@ -375,8 +375,8 @@ function mediaLabel(media: Task["media"]) {
   return [media.title, media.year].filter(Boolean).join(" · ");
 }
 
-function historySource(source: string) {
-	if (source === "jellyfin") return { label: "Jellyfin direct", detail: "Received directly from the WatchWeaver Jellyfin plugin" };
+function historySource(source: string, instance?: string) {
+	if (source === "jellyfin") return { label: ["Jellyfin direct", instance].filter(Boolean).join(" · "), detail: "Received directly from the WatchWeaver Jellyfin plugin" };
 	if (source === "trakt") return { label: "Trakt", detail: "Received from Trakt, including activity Trakt may have received from another app" };
 	return { label: source || "Unknown", detail: "Recorded by WatchWeaver from this source" };
 }
@@ -620,7 +620,7 @@ function History({ onError }: { onError: (v: string) => void }) {
       ) : (
         <div className="timeline">
           {data.items.map((item) => {
-            const source = historySource(item.source);
+            const source = historySource(item.source, item.source_instance);
             return <article key={item.id}>
               <div className="timeline-date">
                 <strong>
