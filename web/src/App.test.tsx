@@ -356,20 +356,19 @@ describe("WatchWeaver dashboard", () => {
 		render(<App />);
 		await screen.findByText("The Example");
 		fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
-		fireEvent.click(await screen.findByRole("button", { name: /Local push/ }));
 		fireEvent.click(await screen.findByRole("button", { name: "Generate token" }));
 		expect(await screen.findByText("one-time-jellyfin-token")).toBeInTheDocument();
 		await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/integrations/jellyfin", expect.objectContaining({ method: "POST" })));
 	});
-  it("shows only the selected Jellyfin connection method", async () => {
+  it("shows local receiver and remote connection together", async () => {
     render(<App />);
     await screen.findByText("The Example");
     fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(await screen.findByLabelText("Jellyfin URL")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Generate token" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Local push/ }));
-    expect(screen.queryByLabelText("Jellyfin URL")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate token" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Plugin receiver connection")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remote Jellyfin connection")).toBeInTheDocument();
+    expect(screen.getByText(/does not disable or change your local plugin receiver/i)).toBeInTheDocument();
   });
   it("keeps connected Trakt credentials collapsed until explicitly edited", async () => {
     render(<App />);

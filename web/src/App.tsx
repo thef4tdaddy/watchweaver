@@ -1020,7 +1020,6 @@ function SettingsView({
   const [jellyfinURL, setJellyfinURL] = useState("");
   const [jellyfinAPIKey, setJellyfinAPIKey] = useState("");
   const [jellyfinUserID, setJellyfinUserID] = useState("");
-  const [jellyfinMode, setJellyfinMode] = useState<"remote" | "push">("remote");
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -1182,11 +1181,12 @@ function SettingsView({
 		<div className="settings-card jellyfin-card">
 			<div className="card-heading">
 				<div><p className="eyebrow">AUTOMATED SOURCE</p><h2>Jellyfin</h2></div>
-				<span className={`state ${(jellyfinMode === "remote" ? jellyfinRemote?.connected : setup.jellyfin?.configured) ? "confirmed" : "pending"}`}>{jellyfinMode === "remote" ? jellyfinRemote?.connected ? "Connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not configured" : setup.jellyfin?.configured ? "Ready" : "Not configured"}</span>
+				<span className={`state ${(jellyfinRemote?.connected || setup.jellyfin?.configured) ? "confirmed" : "pending"}`}>{jellyfinRemote?.connected && setup.jellyfin?.configured ? "2 connections" : jellyfinRemote?.connected || setup.jellyfin?.configured ? "Connected" : "Not configured"}</span>
 			</div>
-			<p className="jellyfin-summary">Choose how Jellyfin and WatchWeaver can reach each other. Remote is best for a seedbox; local push is best when both are on the same private network.</p>
-			<div className="connection-tabs" role="group" aria-label="Jellyfin connection method"><button type="button" className={jellyfinMode === "remote" ? "active" : ""} onClick={()=>setJellyfinMode("remote")}><strong>Remote</strong><small>WatchWeaver connects out</small></button><button type="button" className={jellyfinMode === "push" ? "active" : ""} onClick={()=>setJellyfinMode("push")}><strong>Local push</strong><small>Plugin sends events in</small></button></div>
-			{jellyfinMode === "push" ? <div className="jellyfin-method">
+			<p className="jellyfin-summary">Use either connection independently, or run both together. Adding a remote seedbox connection does not disable or change your local plugin receiver.</p>
+			<div className="jellyfin-sources-grid">
+			<div className="jellyfin-method source-panel" aria-label="Plugin receiver connection">
+			<div className="source-heading"><div><p className="eyebrow">JELLYFIN → WATCHWEAVER</p><h3>Plugin receiver</h3></div><span className={`state ${setup.jellyfin?.configured ? "confirmed" : "pending"}`}>{setup.jellyfin?.configured ? "Enabled" : "Not configured"}</span></div>
 			<div className="connection-info compact">
 				{integrations.jellyfin?.last_accepted_at ? <>
 					<StatusDot ok label="Events received" />
@@ -1201,7 +1201,9 @@ function SettingsView({
 			</div>
 			{jellyfinToken && <div className="auth-code jellyfin-token"><p>Paste this token into the Jellyfin plugin now:</p><strong>{jellyfinToken}</strong><button className="secondary" onClick={() => void copyToClipboard(jellyfinToken).then(() => setIntegrationMessage("Jellyfin token copied.")).catch((error) => onError(error.message))}>Copy token</button></div>}
 			<div className="override-note">Private LAN/VPN only. The receiving token is encrypted and is only shown when generated.</div>
-			</div> : <div className="jellyfin-method credential-fields">
+			</div>
+			<div className="jellyfin-method credential-fields source-panel" aria-label="Remote Jellyfin connection">
+				<div className="source-heading"><div><p className="eyebrow">WATCHWEAVER → JELLYFIN</p><h3>Remote connection</h3></div><span className={`state ${jellyfinRemote?.connected ? "confirmed" : "pending"}`}>{jellyfinRemote?.connected ? "Connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not configured"}</span></div>
 				<p>Enter the Jellyfin address WatchWeaver can reach and an API key created in the Jellyfin dashboard.</p>
 				<div className="two-col jellyfin-fields">
 				<label>Jellyfin URL<input type="url" value={jellyfinURL} onChange={(event)=>setJellyfinURL(event.target.value)} placeholder="https://jellyfin.example.com" /></label>
@@ -1210,7 +1212,8 @@ function SettingsView({
 				<div className="connection-info compact"><StatusDot ok={jellyfinRemote?.connected === true} label={jellyfinRemote?.connected ? "Stream connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not connected"} />{jellyfinRemote?.last_event_at && <p>Last event {formatDate(jellyfinRemote.last_event_at)} · {jellyfinRemote.events_received} received</p>}{jellyfinRemote?.last_error && <small className="warning">{jellyfinRemote.last_error}</small>}</div>
 				<div className="settings-actions"><button className="primary" disabled={integrationBusy || !jellyfinURL || (!jellyfinAPIKey && !jellyfinRemote?.configured)} onClick={()=>void saveRemoteJellyfin()}>Save and connect</button><button className="secondary" disabled={integrationBusy || !jellyfinRemote?.configured} onClick={()=>void testRemoteJellyfin()}>Test connection</button></div>
 				<div className="override-note">Your API key is encrypted at rest. WatchWeaver stays private and only makes an outbound connection.</div>
-			</div>}
+			</div>
+			</div>
 		</div>
       <div className="settings-card">
         <div className="card-heading">
