@@ -48,6 +48,7 @@ const task: Task = {
 };
 let activeTask: Task | undefined = task;
 let serializdReviews: Array<Record<string, unknown>> = [];
+let historyTrackingSource = "trakt";
 function json(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -60,6 +61,7 @@ function json(body: unknown, status = 200) {
 beforeEach(() => {
   activeTask = task;
   serializdReviews = [];
+  historyTrackingSource = "trakt";
   currentIntegrations = integrations;
   vi.stubGlobal(
     "fetch",
@@ -78,7 +80,7 @@ beforeEach(() => {
           items: activeTask ? [activeTask] : [],
         });
       if (path.startsWith("/api/history"))
-        return json({ page: 1, per_page: 20, total: 1, total_pages: 1, items: [{ id: 1, source: "trakt", watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: task.media }] });
+        return json({ page: 1, per_page: 20, total: 1, total_pages: 1, items: [{ id: 1, source: historyTrackingSource, watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: task.media }] });
       if (path === "/api/media/9/rating")
         return json({ media_id: 9, rating: 8, stars: 4 });
       if (path === "/api/media/9/review" && !init?.method)
@@ -221,6 +223,12 @@ describe("WatchWeaver dashboard", () => {
     render(<App />);
     await screen.findByText("The Example");
     expect(screen.queryByRole("button", { name: /Refresh Inbox data/ })).not.toBeInTheDocument();
+  });
+  it("identifies whether history arrived through Trakt or directly from Jellyfin", async () => {
+    historyTrackingSource = "jellyfin";
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByLabelText("Tracking source: Jellyfin direct")).toHaveAttribute("title", "Received directly from the WatchWeaver Jellyfin plugin");
   });
   it("navigates to Serializd status and settings without rendering secrets", async () => {
     render(<App />);
