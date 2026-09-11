@@ -43,8 +43,8 @@ func TestRemoteJellyfinConfigurationIsEncryptedAndRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.api.SetCredentialStore(store)
-	manager := jellyfinremote.New(nil, jellyfin.NewService(f.db))
-	f.api.SetJellyfinRemoteManager(manager)
+	pool := jellyfinremote.NewPool(nil, jellyfin.NewService(f.db))
+	f.api.SetJellyfinRemotePool(pool)
 	rr := f.request(http.MethodPut, "/api/integrations/jellyfin/remote", `{"enabled":true,"url":"https://jellyfin.example/","user_id":"user-a","api_key":"super-secret-key"}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", rr.Code, rr.Body.String())
@@ -59,6 +59,36 @@ func TestRemoteJellyfinConfigurationIsEncryptedAndRedacted(t *testing.T) {
 	var plaintext int
 	if err := f.db.QueryRow(`SELECT COUNT(*) FROM encrypted_credentials WHERE CAST(ciphertext AS TEXT) LIKE '%super-secret-key%'`).Scan(&plaintext); err != nil || plaintext != 0 {
 		t.Fatalf("plaintext=%d err=%v", plaintext, err)
+	}
+}
+
+func TestMultipleRemoteJellyfinSourcesAreIndependentAndRedacted(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	store, err := credentials.Open(f.db, filepath.Join(t.TempDir(), "key"), credentials.Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.api.SetCredentialStore(store)
+	f.api.SetJellyfinRemotePool(jellyfinremote.NewPool(nil, jellyfin.NewService(f.db)))
+	for _, body := range []string{
+		`{"name":"Local Jellyfin","enabled":true,"url":"http://192.168.1.20:8096","api_key":"local-secret"}`,
+		`{"name":"Seedbox Jellyfin","enabled":true,"url":"https://seedbox.example","api_key":"seedbox-secret"}`,
+	} {
+		rr := f.request(http.MethodPost, "/api/integrations/jellyfin/remotes", body)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+	rr := f.request(http.MethodGet, "/api/integrations/jellyfin/remotes", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Local Jellyfin") || !strings.Contains(rr.Body.String(), "Seedbox Jellyfin") || strings.Contains(rr.Body.String(), "local-secret") || strings.Contains(rr.Body.String(), "seedbox-secret") {
+		t.Fatalf("list: %d %s", rr.Code, rr.Body.String())
+	}
+	var sources, storedCredentials int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM jellyfin_remote_sources`).Scan(&sources); err != nil || sources != 2 {
+		t.Fatalf("sources=%d err=%v", sources, err)
+	}
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM encrypted_credentials WHERE integration LIKE 'jellyfin_remote:%'`).Scan(&storedCredentials); err != nil || storedCredentials != 2 {
+		t.Fatalf("credentials=%d err=%v", storedCredentials, err)
 	}
 }
 func ingestRequest(f *apiFixture, token, key, body string) *httptest.ResponseRecorder {

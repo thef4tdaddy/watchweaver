@@ -127,6 +127,8 @@ export type Integrations = {
   discord: { enabled: boolean; status: string };
 };
 export type JellyfinRemote = {
+  id: string;
+  name: string;
   configured: boolean;
   enabled: boolean;
   url?: string;
@@ -139,6 +141,7 @@ export type JellyfinRemote = {
   events_received: number;
   protocol_version: number;
 };
+export type JellyfinRemotes = { sources: JellyfinRemote[] };
 export type OperationalComponent = {
   state: "working" | "waiting" | "needs_attention" | "disabled";
   label: string;

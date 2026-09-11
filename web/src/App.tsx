@@ -8,6 +8,7 @@ import {
   type HistoryItem,
   type Integrations,
   type JellyfinRemote,
+  type JellyfinRemotes,
   type LetterboxdStatus,
   type OperationalStatus,
   type Page,
@@ -37,7 +38,7 @@ function App() {
   const [view, setView] = useState<View>("inbox");
   const [inboxCount, setInboxCount] = useState(0);
   const [integrations, setIntegrations] = useState<Integrations>();
-  const [jellyfinRemote, setJellyfinRemote] = useState<JellyfinRemote>();
+  const [jellyfinRemotes, setJellyfinRemotes] = useState<JellyfinRemote[]>([]);
   const [error, setError] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>();
   const refreshIntegrations = useCallback(
@@ -48,7 +49,7 @@ function App() {
     [],
   );
   const refreshUpdate = useCallback(() => request<UpdateStatus>("/api/update").then(setUpdateStatus).catch(() => undefined), []);
-  const refreshJellyfinRemote = useCallback(() => request<JellyfinRemote>("/api/integrations/jellyfin/remote").then(setJellyfinRemote).catch(() => undefined), []);
+  const refreshJellyfinRemote = useCallback(() => request<JellyfinRemotes>("/api/integrations/jellyfin/remotes").then((value)=>setJellyfinRemotes(value.sources)).catch(() => undefined), []);
   const refreshInboxCount = useCallback(
     () => request<Page<Task>>("/api/inbox").then((data) => setInboxCount(data.total)).catch(() => undefined),
     [],
@@ -68,7 +69,7 @@ function App() {
     return () => window.clearInterval(timer);
   }, [refreshInboxCount, refreshIntegrations, refreshJellyfinRemote]);
   const traktState = getTraktState(integrations?.trakt);
-  const jellyfinState = getJellyfinState(integrations?.jellyfin, jellyfinRemote);
+  const jellyfinState = getJellyfinState(integrations?.jellyfin, jellyfinRemotes);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -320,10 +321,12 @@ function getTraktState(value?: Integrations["trakt"]) {
   const connected = value?.authorization.status === "connected";
   return { ok: connected, label: connected ? "Connected" : "Not connected" };
 }
-function getJellyfinState(value?: Integrations["jellyfin"], remote?: JellyfinRemote) {
-  if (remote?.configured && remote.enabled) return remote.connected
-    ? { ok: true, label: "Connected", detail: "WatchWeaver → Jellyfin" }
-    : { ok: false, label: "Reconnecting", detail: "WatchWeaver → Jellyfin" };
+function getJellyfinState(value?: Integrations["jellyfin"], remotes: JellyfinRemote[] = []) {
+  const enabled = remotes.filter((remote)=>remote.enabled);
+  const connected = enabled.filter((remote)=>remote.connected);
+  if (enabled.length) return connected.length === enabled.length
+    ? { ok: true, label: connected.length > 1 ? `${connected.length} connected` : "Connected", detail: `WatchWeaver → ${connected.map((source)=>source.name).join(" + ")}` }
+    : { ok: false, label: `${connected.length}/${enabled.length} connected`, detail: `WatchWeaver → Jellyfin` };
   if (!value?.configured) return { ok: false, label: "Not configured", detail: "Choose a connection mode" };
   const rejected = value.last_rejection_at ? Date.parse(value.last_rejection_at) : 0;
   const accepted = value.last_accepted_at ? Date.parse(value.last_accepted_at) : 0;
@@ -1016,11 +1019,12 @@ function SettingsView({
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationMessage, setIntegrationMessage] = useState("");
 	const [jellyfinToken, setJellyfinToken] = useState("");
-  const [jellyfinRemote, setJellyfinRemote] = useState<JellyfinRemote>();
+  const [jellyfinRemotes, setJellyfinRemotes] = useState<JellyfinRemote[]>([]);
+  const [jellyfinKeys, setJellyfinKeys] = useState<Record<string,string>>({});
+  const [jellyfinName, setJellyfinName] = useState("");
   const [jellyfinURL, setJellyfinURL] = useState("");
   const [jellyfinAPIKey, setJellyfinAPIKey] = useState("");
   const [jellyfinUserID, setJellyfinUserID] = useState("");
-  const [jellyfinMode, setJellyfinMode] = useState<"remote" | "push">("remote");
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -1031,15 +1035,15 @@ function SettingsView({
         setDiscordEnabled(value.discord.enabled);
       })
       .catch((e) => onError(e.message));
-    request<JellyfinRemote>("/api/integrations/jellyfin/remote")
-      .then((value) => { setJellyfinRemote(value); setJellyfinURL(value.url || ""); setJellyfinUserID(value.user_id || ""); })
+    request<JellyfinRemotes>("/api/integrations/jellyfin/remotes")
+      .then((value) => setJellyfinRemotes(value.sources))
       .catch((e) => onError(e.message));
   }, [onError]);
   useEffect(() => {
-    if (!jellyfinRemote?.configured) return;
-    const timer = window.setInterval(() => void request<JellyfinRemote>("/api/integrations/jellyfin/remote").then(setJellyfinRemote).catch(() => undefined), 5000);
+    if (!jellyfinRemotes.length) return;
+    const timer = window.setInterval(() => void request<JellyfinRemotes>("/api/integrations/jellyfin/remotes").then((value)=>setJellyfinRemotes(value.sources)).catch(() => undefined), 5000);
     return () => window.clearInterval(timer);
-  }, [jellyfinRemote?.configured]);
+  }, [jellyfinRemotes.length]);
   const runIntegrationAction = async (action: () => Promise<string>) => {
     setIntegrationBusy(true);
     setIntegrationMessage("");
@@ -1097,15 +1101,22 @@ function SettingsView({
 		});
   const saveRemoteJellyfin = () =>
     runIntegrationAction(async () => {
-      const value = await request<JellyfinRemote>("/api/integrations/jellyfin/remote", { method: "PUT", body: JSON.stringify({ enabled: true, url: jellyfinURL, user_id: jellyfinUserID, api_key: jellyfinAPIKey }) });
-      setJellyfinRemote(value); setJellyfinAPIKey("");
-      return "Remote Jellyfin connection saved. WatchWeaver is connecting now.";
+      const value = await request<JellyfinRemote>("/api/integrations/jellyfin/remotes", { method: "POST", body: JSON.stringify({ name: jellyfinName, enabled: true, url: jellyfinURL, user_id: jellyfinUserID, api_key: jellyfinAPIKey }) });
+      setJellyfinRemotes((current)=>[...current,value]); setJellyfinName(""); setJellyfinURL(""); setJellyfinUserID(""); setJellyfinAPIKey("");
+      return `${value.name} saved. WatchWeaver is connecting now.`;
     });
-  const testRemoteJellyfin = () =>
+  const testRemoteJellyfin = (id: string, name: string) =>
     runIntegrationAction(async () => {
-      const value = await request<{server_version:string}>("/api/integrations/jellyfin/remote/test", { method: "POST" });
-      return `Connected to Jellyfin ${value.server_version}.`;
+      const value = await request<{server_version:string}>(`/api/integrations/jellyfin/remotes/${id}/test`, { method: "POST" });
+      return `${name} connected (Jellyfin ${value.server_version}).`;
     });
+  const updateRemoteJellyfin = (source: JellyfinRemote) => runIntegrationAction(async()=>{
+    const value=await request<JellyfinRemote>(`/api/integrations/jellyfin/remotes/${source.id}`,{method:"PUT",body:JSON.stringify({name:source.name,enabled:source.enabled,url:source.url,user_id:source.user_id||"",api_key:jellyfinKeys[source.id]||""})});
+    setJellyfinRemotes((current)=>current.map((item)=>item.id===value.id?value:item)); setJellyfinKeys((current)=>({...current,[source.id]:""})); return `${value.name} updated.`;
+  });
+  const removeRemoteJellyfin = (source: JellyfinRemote) => runIntegrationAction(async()=>{
+    await request(`/api/integrations/jellyfin/remotes/${source.id}`,{method:"DELETE"}); setJellyfinRemotes((current)=>current.filter((item)=>item.id!==source.id)); return `${source.name} removed.`;
+  });
   const save = async () => {
     if (!settings) return;
     if (!isValidTimezone(settings.timezone)) {
@@ -1182,11 +1193,12 @@ function SettingsView({
 		<div className="settings-card jellyfin-card">
 			<div className="card-heading">
 				<div><p className="eyebrow">AUTOMATED SOURCE</p><h2>Jellyfin</h2></div>
-				<span className={`state ${(jellyfinMode === "remote" ? jellyfinRemote?.connected : setup.jellyfin?.configured) ? "confirmed" : "pending"}`}>{jellyfinMode === "remote" ? jellyfinRemote?.connected ? "Connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not configured" : setup.jellyfin?.configured ? "Ready" : "Not configured"}</span>
+				<span className={`state ${(jellyfinRemotes.some((source)=>source.connected) || setup.jellyfin?.configured) ? "confirmed" : "pending"}`}>{jellyfinRemotes.filter((source)=>source.connected).length + (setup.jellyfin?.configured ? 1 : 0) ? `${jellyfinRemotes.filter((source)=>source.connected).length + (setup.jellyfin?.configured ? 1 : 0)} active` : "Not configured"}</span>
 			</div>
-			<p className="jellyfin-summary">Choose how Jellyfin and WatchWeaver can reach each other. Remote is best for a seedbox; local push is best when both are on the same private network.</p>
-			<div className="connection-tabs" role="group" aria-label="Jellyfin connection method"><button type="button" className={jellyfinMode === "remote" ? "active" : ""} onClick={()=>setJellyfinMode("remote")}><strong>Remote</strong><small>WatchWeaver connects out</small></button><button type="button" className={jellyfinMode === "push" ? "active" : ""} onClick={()=>setJellyfinMode("push")}><strong>Local push</strong><small>Plugin sends events in</small></button></div>
-			{jellyfinMode === "push" ? <div className="jellyfin-method">
+			<p className="jellyfin-summary">Use either connection independently, or run both together. Adding a remote seedbox connection does not disable or change your local plugin receiver.</p>
+			<div className="jellyfin-sources-grid">
+			<div className="jellyfin-method source-panel" aria-label="Plugin receiver connection">
+			<div className="source-heading"><div><p className="eyebrow">JELLYFIN → WATCHWEAVER</p><h3>Plugin receiver</h3></div><span className={`state ${setup.jellyfin?.configured ? "confirmed" : "pending"}`}>{setup.jellyfin?.configured ? "Enabled" : "Not configured"}</span></div>
 			<div className="connection-info compact">
 				{integrations.jellyfin?.last_accepted_at ? <>
 					<StatusDot ok label="Events received" />
@@ -1201,16 +1213,32 @@ function SettingsView({
 			</div>
 			{jellyfinToken && <div className="auth-code jellyfin-token"><p>Paste this token into the Jellyfin plugin now:</p><strong>{jellyfinToken}</strong><button className="secondary" onClick={() => void copyToClipboard(jellyfinToken).then(() => setIntegrationMessage("Jellyfin token copied.")).catch((error) => onError(error.message))}>Copy token</button></div>}
 			<div className="override-note">Private LAN/VPN only. The receiving token is encrypted and is only shown when generated.</div>
-			</div> : <div className="jellyfin-method credential-fields">
-				<p>Enter the Jellyfin address WatchWeaver can reach and an API key created in the Jellyfin dashboard.</p>
+			</div>
+			<div className="jellyfin-method credential-fields source-panel" aria-label="Remote Jellyfin connection">
+				<div className="source-heading"><div><p className="eyebrow">WATCHWEAVER → JELLYFIN</p><h3>Remote connections</h3></div><span className={`state ${jellyfinRemotes.some((source)=>source.connected) ? "confirmed" : "pending"}`}>{jellyfinRemotes.length ? `${jellyfinRemotes.filter((source)=>source.connected).length}/${jellyfinRemotes.length} connected` : "None added"}</span></div>
+				<p>Add every Jellyfin server WatchWeaver can reach. Each stream connects and retries independently.</p>
+				{jellyfinRemotes.map((source)=><div className="remote-source" key={source.id} aria-label={`Jellyfin source ${source.name}`}>
+					<div className="two-col jellyfin-fields">
+					<label>Connection name<input value={source.name} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,name:event.target.value}:item))}/></label>
+					<label>Jellyfin URL<input type="url" value={source.url||""} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,url:event.target.value}:item))}/></label>
+					<label>New API key (optional)<input type="password" value={jellyfinKeys[source.id]||""} onChange={(event)=>setJellyfinKeys((current)=>({...current,[source.id]:event.target.value}))} placeholder="Leave blank to keep saved key" autoComplete="new-password"/></label>
+					<label>Jellyfin user ID (optional)<input value={source.user_id||""} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,user_id:event.target.value}:item))}/></label>
+					</div>
+					<label className="inline-check"><input type="checkbox" checked={source.enabled} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,enabled:event.target.checked}:item))}/> Keep this connection enabled</label>
+					<div className="connection-info compact"><StatusDot ok={source.connected} label={source.connected ? "Stream connected" : source.enabled ? "Reconnecting" : "Disabled"}/>{source.last_event_at&&<p>Last event {formatDate(source.last_event_at)} · {source.events_received} received</p>}{source.last_error&&<small className="warning">{source.last_error}</small>}</div>
+					<div className="settings-actions"><button className="primary" disabled={integrationBusy||!source.name||!source.url} onClick={()=>void updateRemoteJellyfin(source)}>Save changes</button><button className="secondary" disabled={integrationBusy} onClick={()=>void testRemoteJellyfin(source.id,source.name)}>Test</button><button className="secondary danger" disabled={integrationBusy} onClick={()=>void removeRemoteJellyfin(source)}>Remove</button></div>
+				</div>)}
+				<h4>Add another Jellyfin server</h4>
 				<div className="two-col jellyfin-fields">
+				<label>Connection name<input value={jellyfinName} onChange={(event)=>setJellyfinName(event.target.value)} placeholder="Seedbox Jellyfin" /></label>
 				<label>Jellyfin URL<input type="url" value={jellyfinURL} onChange={(event)=>setJellyfinURL(event.target.value)} placeholder="https://jellyfin.example.com" /></label>
-				<label>Jellyfin API key<input type="password" value={jellyfinAPIKey} onChange={(event)=>setJellyfinAPIKey(event.target.value)} placeholder={jellyfinRemote?.configured ? "Leave blank to keep the saved key" : "API key"} autoComplete="new-password" /></label>
+				<label>Jellyfin API key<input type="password" value={jellyfinAPIKey} onChange={(event)=>setJellyfinAPIKey(event.target.value)} placeholder="API key" autoComplete="new-password" /></label>
+				<label>Jellyfin user ID (optional)<input value={jellyfinUserID} onChange={(event)=>setJellyfinUserID(event.target.value)} placeholder="Limit this source to one user" /></label>
 				</div>
-				<div className="connection-info compact"><StatusDot ok={jellyfinRemote?.connected === true} label={jellyfinRemote?.connected ? "Stream connected" : jellyfinRemote?.configured ? "Reconnecting" : "Not connected"} />{jellyfinRemote?.last_event_at && <p>Last event {formatDate(jellyfinRemote.last_event_at)} · {jellyfinRemote.events_received} received</p>}{jellyfinRemote?.last_error && <small className="warning">{jellyfinRemote.last_error}</small>}</div>
-				<div className="settings-actions"><button className="primary" disabled={integrationBusy || !jellyfinURL || (!jellyfinAPIKey && !jellyfinRemote?.configured)} onClick={()=>void saveRemoteJellyfin()}>Save and connect</button><button className="secondary" disabled={integrationBusy || !jellyfinRemote?.configured} onClick={()=>void testRemoteJellyfin()}>Test connection</button></div>
+				<div className="settings-actions"><button className="primary" disabled={integrationBusy || !jellyfinName || !jellyfinURL || !jellyfinAPIKey} onClick={()=>void saveRemoteJellyfin()}>Add and connect</button></div>
 				<div className="override-note">Your API key is encrypted at rest. WatchWeaver stays private and only makes an outbound connection.</div>
-			</div>}
+			</div>
+			</div>
 		</div>
       <div className="settings-card">
         <div className="card-heading">

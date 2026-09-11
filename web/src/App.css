@@ -66,9 +66,11 @@ textarea,input{background:#020617;color:var(--ink)}
 .connection-tabs button{display:grid;gap:2px;text-align:left;border:1px solid transparent;border-radius:8px;padding:11px 14px;background:transparent;color:var(--muted)}
 .connection-tabs button.active{color:var(--ink);border-color:#4338ca;background:linear-gradient(135deg,#2e1065aa,#172554)}
 .connection-tabs small{font-size:11px;font-weight:500;color:var(--muted)}
+.jellyfin-sources-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.source-panel{border:1px solid var(--line);border-radius:12px;padding:16px;background:#02061755}.source-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.source-heading h3{margin:2px 0 12px}.source-heading .state{white-space:nowrap}
+.remote-source{border-top:1px solid var(--line);padding:16px 0;margin-top:12px}.remote-source:last-of-type{border-bottom:1px solid var(--line);margin-bottom:16px}.inline-check{display:flex!important;flex-direction:row!important;align-items:center;gap:8px}.inline-check input{width:auto}.danger{color:#fca5a5!important;border-color:#7f1d1d!important}
 .jellyfin-method{max-width:900px;margin-top:14px;padding-top:2px}
 .jellyfin-method>p{color:var(--muted);margin:8px 0 2px}
 .jellyfin-fields label{margin:12px 0}
 .connection-info.compact{margin:12px 0;gap:5px}
 .jellyfin-method .override-note{max-width:700px;margin-top:14px}
-@media(max-width:650px){.connection-tabs,.jellyfin-fields{grid-template-columns:1fr}.star-picker{width:160px}.star-track,.star-picker>.star-fill{font-size:29px;letter-spacing:2px}}
+@media(max-width:900px){.jellyfin-sources-grid{grid-template-columns:1fr}}@media(max-width:650px){.connection-tabs,.jellyfin-fields{grid-template-columns:1fr}.star-picker{width:160px}.star-track,.star-picker>.star-fill{font-size:29px;letter-spacing:2px}}
