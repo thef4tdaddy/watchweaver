@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Integrations, Task } from "./api";
+import type { Integrations, JellyfinRemote, Task } from "./api";
 
 const integrations: Integrations = {
   trakt: {
@@ -49,7 +49,7 @@ const task: Task = {
 let activeTask: Task | undefined = task;
 let serializdReviews: Array<Record<string, unknown>> = [];
 let historyTrackingSource = "trakt";
-let currentJellyfinRemote = { configured: false, enabled: false, connected: false, reconnect_count: 0, events_received: 0, protocol_version: 1 };
+let currentJellyfinRemotes: JellyfinRemote[] = [];
 function json(body: unknown, status = 200) {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -63,14 +63,20 @@ beforeEach(() => {
   activeTask = task;
   serializdReviews = [];
   historyTrackingSource = "trakt";
-  currentJellyfinRemote = { configured: false, enabled: false, connected: false, reconnect_count: 0, events_received: 0, protocol_version: 1 };
+  currentJellyfinRemotes = [];
   currentIntegrations = integrations;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/integrations") return json(currentIntegrations);
-      if (path === "/api/integrations/jellyfin/remote") return json(currentJellyfinRemote);
+      if (path === "/api/integrations/jellyfin/remotes" && !init?.method) return json({sources:currentJellyfinRemotes});
+      if (path === "/api/integrations/jellyfin/remotes" && init?.method === "POST") {
+        const body=JSON.parse(String(init.body)); const source={id:"remote-1",...body,configured:true,connected:false,reconnect_count:0,events_received:0,protocol_version:1}; currentJellyfinRemotes=[...currentJellyfinRemotes,source]; return json(source,201);
+      }
+      if (path.match(/^\/api\/integrations\/jellyfin\/remotes\/[^/]+\/test$/)) return json({connected:true,server_version:"10.11.11"});
+      if (path.match(/^\/api\/integrations\/jellyfin\/remotes\/[^/]+$/) && init?.method === "PUT") { const body=JSON.parse(String(init.body)); const source={...currentJellyfinRemotes[0],...body}; currentJellyfinRemotes=[source]; return json(source); }
+      if (path.match(/^\/api\/integrations\/jellyfin\/remotes\/[^/]+$/) && init?.method === "DELETE") return Promise.resolve(new Response(null,{status:204}));
       if (path === "/api/setup") return json({ complete: true, encrypted_storage: true, trakt: { configured: true, authorization_status: "connected", client_id_overridden: false, client_secret_overridden: false }, discord: { configured: true, enabled: false, webhook_overridden: false } });
       if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
       if (path === "/api/inbox")
@@ -446,12 +452,12 @@ describe("WatchWeaver dashboard", () => {
     expect(await screen.findByText(/after watch activity is processed/)).toBeInTheDocument();
   });
   it("shows provider colors, Jellyfin direction, and expired Trakt authorization", async () => {
-    currentJellyfinRemote = { configured: true, enabled: true, connected: true, reconnect_count: 0, events_received: 2, protocol_version: 1 };
+    currentJellyfinRemotes = [{ id:"seedbox", name:"Seedbox Jellyfin", configured: true, enabled: true, url:"https://jellyfin.example", connected: true, reconnect_count: 0, events_received: 2, protocol_version: 1 }];
     currentIntegrations = { ...integrations, trakt: { ...integrations.trakt, sync: { ...integrations.trakt.sync, last_error: "fetch trakt history: HTTP 401" } }, discord: { enabled: true, status: "enabled" } };
     render(<App />);
     expect(await screen.findByText("Trakt · Reconnect required")).toBeInTheDocument();
     expect(screen.getByText("Jellyfin · Connected")).toBeInTheDocument();
-    expect(screen.getByText("WatchWeaver → Jellyfin")).toBeInTheDocument();
+    expect(screen.getByText("WatchWeaver → Seedbox Jellyfin")).toBeInTheDocument();
     expect(screen.getByText("Discord · On").closest(".status-dot")).toHaveClass("provider-discord", "active");
   });
   it("copies and durably confirms Serializd television reviews", async () => {

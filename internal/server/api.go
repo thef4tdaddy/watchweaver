@@ -33,7 +33,7 @@ type API struct {
 	credentials       *credentials.Store
 	discord           *discord.Notifier
 	traktSync         *trakt.SyncManager
-	jellyfinRemote    *jellyfinremote.Manager
+	jellyfinRemotes   *jellyfinremote.Pool
 	discordConfigured bool
 	version           string
 	revision          string
@@ -44,11 +44,11 @@ type API struct {
 	updateCache       updateCache
 }
 
-func (a *API) SetDiscordConfigured(configured bool)                     { a.discordConfigured = configured }
-func (a *API) SetCredentialStore(store *credentials.Store)              { a.credentials = store }
-func (a *API) SetDiscordNotifier(notifier *discord.Notifier)            { a.discord = notifier }
-func (a *API) SetTraktSyncManager(manager *trakt.SyncManager)           { a.traktSync = manager }
-func (a *API) SetJellyfinRemoteManager(manager *jellyfinremote.Manager) { a.jellyfinRemote = manager }
+func (a *API) SetDiscordConfigured(configured bool)            { a.discordConfigured = configured }
+func (a *API) SetCredentialStore(store *credentials.Store)     { a.credentials = store }
+func (a *API) SetDiscordNotifier(notifier *discord.Notifier)   { a.discord = notifier }
+func (a *API) SetTraktSyncManager(manager *trakt.SyncManager)  { a.traktSync = manager }
+func (a *API) SetJellyfinRemotePool(pool *jellyfinremote.Pool) { a.jellyfinRemotes = pool }
 
 func NewAPI(db *sql.DB, traktService *trakt.Service) *API {
 	return &API{db: db, ratings: ratings.NewService(db), letterboxd: letterboxd.NewService(db), serializd: serializd.NewService(db), trakt: traktService, version: "dev", updateURL: "https://api.github.com/repos/thef4tdaddy/watchweaver/releases", updateTagsURL: "https://api.github.com/repos/thef4tdaddy/watchweaver/tags", compareBaseURL: "https://github.com/thef4tdaddy/watchweaver/compare/", updateClient: &http.Client{Timeout: 5 * time.Second}}
