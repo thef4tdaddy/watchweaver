@@ -31,7 +31,7 @@ start() {
 }
 
 docker pull --platform "${platform}" "${image}"
-label_version="$(docker image inspect --platform "${platform}" --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}")"
+label_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}")"
 test "${label_version}" = "${version}"
 
 start "${image}"
