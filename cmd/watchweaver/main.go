@@ -17,6 +17,7 @@ import (
 	"github.com/thef4tdaddy/watchweaver/internal/discord"
 	"github.com/thef4tdaddy/watchweaver/internal/jellyfin"
 	"github.com/thef4tdaddy/watchweaver/internal/jellyfinremote"
+	"github.com/thef4tdaddy/watchweaver/internal/logging"
 	"github.com/thef4tdaddy/watchweaver/internal/persistence"
 	"github.com/thef4tdaddy/watchweaver/internal/server"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
@@ -27,6 +28,10 @@ var revision = ""
 
 func main() {
 	cfg := config.Load()
+	logging.SetDebug(cfg.DebugLogging)
+	if cfg.DebugLogging {
+		log.Printf("debug logging enabled; sensitive values remain redacted")
+	}
 	if len(os.Args) > 1 {
 		if os.Args[1] != "backup" {
 			log.Fatalf("unknown command %q (supported: backup)", os.Args[1])

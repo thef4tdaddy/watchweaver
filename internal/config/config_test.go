@@ -10,6 +10,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("WATCHWEAVER_SHUTDOWN_TIMEOUT", "")
 	t.Setenv("WATCHWEAVER_DATABASE", "")
 	t.Setenv("DISCORD_WEBHOOK_URL", "")
+	t.Setenv("WATCHWEAVER_LOG_LEVEL", "")
 
 	cfg := Load()
 
@@ -25,6 +26,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DiscordWebhookURL != "" {
 		t.Fatal("Discord should be disabled by default")
 	}
+	if cfg.DebugLogging {
+		t.Fatal("debug logging should be disabled by default")
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -32,6 +36,7 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv("WATCHWEAVER_SHUTDOWN_TIMEOUT", "3s")
 	t.Setenv("WATCHWEAVER_DATABASE", "/tmp/watchweaver-test.db")
 	t.Setenv("DISCORD_WEBHOOK_URL", "https://discord.invalid/webhook-secret")
+	t.Setenv("WATCHWEAVER_LOG_LEVEL", "debug")
 
 	cfg := Load()
 
@@ -46,5 +51,8 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.DiscordWebhookURL != "https://discord.invalid/webhook-secret" {
 		t.Fatal("Discord webhook override missing")
+	}
+	if !cfg.DebugLogging {
+		t.Fatal("debug log level override missing")
 	}
 }

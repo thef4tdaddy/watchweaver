@@ -24,6 +24,7 @@ type Config struct {
 	TraktPollInterval time.Duration
 	TraktPollOverlap  time.Duration
 	DiscordWebhookURL string
+	DebugLogging      bool
 }
 
 func Load() Config {
@@ -49,6 +50,7 @@ func Load() Config {
 		TraktPollInterval: durationEnv("TRAKT_POLL_INTERVAL", defaultTraktPollInterval),
 		TraktPollOverlap:  durationEnv("TRAKT_POLL_OVERLAP", defaultTraktPollOverlap),
 		DiscordWebhookURL: strings.TrimSpace(os.Getenv("DISCORD_WEBHOOK_URL")),
+		DebugLogging:      strings.EqualFold(strings.TrimSpace(os.Getenv("WATCHWEAVER_LOG_LEVEL")), "debug"),
 	}
 }
 

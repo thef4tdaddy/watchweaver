@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/thef4tdaddy/watchweaver/internal/logging"
 	"github.com/thef4tdaddy/watchweaver/internal/prompts"
 )
 
@@ -196,15 +197,15 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 		return result, err
 	}
 	if initialHistory.Pages > 0 {
-		log.Printf("Trakt history baseline checked: pages=%d imported=%d skipped=%d", initialHistory.Pages, initialHistory.Imported, initialHistory.Skipped)
+		logging.Debugf("Trakt history baseline checked: pages=%d imported=%d skipped=%d", initialHistory.Pages, initialHistory.Imported, initialHistory.Skipped)
 	}
 	poller := NewPoller(m.db, importer, PollerOptions{Overlap: m.options.Overlap, MaxRetries: 3, Now: m.options.Now})
-	log.Printf("Trakt incremental history poll started (checkpoint overlap=%s)", m.options.Overlap)
+	logging.Debugf("Trakt incremental history poll started (checkpoint overlap=%s)", m.options.Overlap)
 	pollResult, err := poller.PollResult(ctx)
 	if err != nil {
 		return result, err
 	}
-	log.Printf("Trakt incremental history poll completed")
+	logging.Debugf("Trakt incremental history poll completed")
 	finaleSeasonIDs := pollResult.FinaleSeasonIDs
 	// v2 requests Trakt's extended episode payload; v1 could complete without
 	// receiving episode_type and therefore falsely report zero finales.
@@ -212,7 +213,7 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 		return result, err
 	} else if complete != "1" {
 		since := m.options.Now().UTC().Add(-finaleReconciliationWindow)
-		log.Printf("Trakt finale prompt reconciliation started (window=30d since=%s)", since.Format(time.RFC3339))
+		logging.Debugf("Trakt finale prompt reconciliation started (window=30d since=%s)", since.Format(time.RFC3339))
 		backfill, err := importer.ImportFinalesSince(ctx, since)
 		if err != nil {
 			return result, err
@@ -223,14 +224,14 @@ func (m *SyncManager) cycle(ctx context.Context, started time.Time) (SyncResult,
 		if err := m.set(ctx, "finale_prompt_backfill_complete_v2", "1"); err != nil {
 			return result, err
 		}
-		log.Printf("Trakt finale prompt reconciliation completed: pages=%d items_scanned=%d finales=%d", backfill.Pages, backfill.Scanned, len(backfill.FinaleSeasonIDs))
+		logging.Debugf("Trakt finale prompt reconciliation completed: pages=%d items_scanned=%d finales=%d", backfill.Pages, backfill.Scanned, len(backfill.FinaleSeasonIDs))
 	}
 	if len(finaleSeasonIDs) > 0 {
 		created, err := prompts.NewService(m.db).Apply(ctx, prompts.Batch{CompletedSeasonIDs: finaleSeasonIDs})
 		if err != nil {
 			return result, err
 		}
-		log.Printf("Trakt finale prompts evaluated: seasons=%d created=%d", len(finaleSeasonIDs), len(created))
+		logging.Debugf("Trakt finale prompts evaluated: seasons=%d created=%d", len(finaleSeasonIDs), len(created))
 	}
 	ratings := NewRatingSync(m.db, m.options.BaseURL, m.options.HTTPClient, clientID, token)
 	ratings.SetNow(m.options.Now)

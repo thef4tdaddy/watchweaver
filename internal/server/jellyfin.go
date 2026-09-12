@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/jellyfin"
+	"github.com/thef4tdaddy/watchweaver/internal/logging"
 )
 
 const jellyfinTokenKey = "ingest_token"
@@ -92,7 +93,7 @@ func (a *API) jellyfinIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodHead {
 		svc.RecordProbe(r.Context(), r.Header.Get("X-Jellyfin-Server-Version"), r.Header.Get("X-WatchWeaver-Plugin-Version"))
-		log.Printf("Jellyfin heartbeat accepted: server_version=%q plugin_version=%q", r.Header.Get("X-Jellyfin-Server-Version"), r.Header.Get("X-WatchWeaver-Plugin-Version"))
+		logging.Debugf("Jellyfin heartbeat accepted: server_version=%q plugin_version=%q", r.Header.Get("X-Jellyfin-Server-Version"), r.Header.Get("X-WatchWeaver-Plugin-Version"))
 		w.Header().Set("X-WatchWeaver-Protocol-Version", "1")
 		w.WriteHeader(http.StatusNoContent)
 		return

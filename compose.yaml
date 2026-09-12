@@ -9,6 +9,8 @@ services:
       TZ: ${TZ:-UTC}
       WATCHWEAVER_LISTEN_ADDR: :8080
       WATCHWEAVER_DATABASE: /data/watchweaver.db
+      # Set to debug temporarily when collecting detailed, still-redacted logs.
+      WATCHWEAVER_LOG_LEVEL: ${WATCHWEAVER_LOG_LEVEL:-info}
     ports:
       # Bind this only on a trusted LAN/VPN. On public-facing hosts, bind to
       # loopback and place an authenticated reverse proxy in front instead.

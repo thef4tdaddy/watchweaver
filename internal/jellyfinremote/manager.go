@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/jellyfin"
+	"github.com/thef4tdaddy/watchweaver/internal/logging"
 )
 
 type Config struct {
@@ -46,13 +47,15 @@ type Accepter interface {
 }
 
 type Manager struct {
-	client *http.Client
-	accept Accepter
-	mu     sync.RWMutex
-	config Config
-	status Status
-	wake   chan struct{}
-	cancel context.CancelFunc
+	client               *http.Client
+	accept               Accepter
+	mu                   sync.RWMutex
+	config               Config
+	status               Status
+	wake                 chan struct{}
+	cancel               context.CancelFunc
+	lastLoggedDisconnect time.Time
+	lastLoggedErrorCode  string
 }
 
 func New(client *http.Client, accept Accepter) *Manager {
@@ -141,16 +144,28 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.mu.Lock()
 		m.status.Connected = false
 		m.status.NextRetryAt = nil
+		logDisconnect := false
+		code := errorCode(err)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			nextRetry := time.Now().UTC().Add(backoff)
-			m.status.LastErrorCode = errorCode(err)
+			now := time.Now().UTC()
+			nextRetry := now.Add(backoff)
+			m.status.LastErrorCode = code
 			m.status.LastError = safeError(err)
 			m.status.NextRetryAt = &nextRetry
 			m.status.ReconnectCount++
+			logDisconnect = code != m.lastLoggedErrorCode || now.Sub(m.lastLoggedDisconnect) >= 15*time.Minute
+			if logDisconnect {
+				m.lastLoggedErrorCode = code
+				m.lastLoggedDisconnect = now
+			}
 		}
 		m.mu.Unlock()
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("Jellyfin remote stream disconnected; retry_in=%s code=%s", backoff, errorCode(err))
+			if logDisconnect {
+				log.Printf("Jellyfin remote stream disconnected; retry_in=%s code=%s", backoff, code)
+			} else {
+				logging.Debugf("Jellyfin remote stream retry suppressed from normal log; retry_in=%s code=%s", backoff, code)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -195,7 +210,7 @@ func (m *Manager) consume(ctx context.Context, cfg Config) error {
 	m.status.LastError = ""
 	m.status.NextRetryAt = nil
 	m.mu.Unlock()
-	log.Printf("Jellyfin remote stream connected")
+	logging.Debugf("Jellyfin remote stream connected")
 	err = parseSSE(res.Body, func(name string, data []byte) error {
 		if name != "watchweaver.event" {
 			return nil
@@ -217,7 +232,7 @@ func (m *Manager) consume(ctx context.Context, cfg Config) error {
 		m.status.LastEventAt = &now
 		m.status.EventsReceived++
 		m.mu.Unlock()
-		log.Printf("Jellyfin remote event accepted: event_id=%q duplicate=%t", event.EventID, result.Duplicate)
+		logging.Debugf("Jellyfin remote event accepted: event_id=%q event_type=%q item_type=%q duplicate=%t", event.EventID, event.EventType, event.Item.Type, result.Duplicate)
 		return nil
 	})
 	if err == nil {
