@@ -92,6 +92,7 @@ jobs:
             echo "value=${base_version}-beta.${GITHUB_RUN_NUMBER}" >> "${GITHUB_OUTPUT}"
           fi
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -101,3 +102,17 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.value }}
             REVISION=${{ github.sha }}
+      - name: Smoke-test published amd64 image
+        run: scripts/smoke-published-image.sh "ghcr.io/thef4tdaddy/watchweaver@${{ steps.build.outputs.digest }}" "${{ steps.version.outputs.value }}" linux/amd64 ghcr.io/thef4tdaddy/watchweaver:0.1.0-beta.31
+      - name: Smoke-test published arm64 image
+        run: scripts/smoke-published-image.sh "ghcr.io/thef4tdaddy/watchweaver@${{ steps.build.outputs.digest }}" "${{ steps.version.outputs.value }}" linux/arm64
+      - name: Record tested artifact
+        shell: bash
+        run: |
+          {
+            echo "## Published image verification"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Version: \`${{ steps.version.outputs.value }}\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Verified: health, readiness, SPA fallback, version metadata, API write, persistent restart, upgrade from \`0.1.0-beta.31\`, preserved encrypted configuration, backup pair, graceful shutdown"
+          } >> "${GITHUB_STEP_SUMMARY}"
