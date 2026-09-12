@@ -6,9 +6,11 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -100,7 +102,7 @@ func main() {
 			return applicationPollInterval(ctx, db, cfg.TraktPollInterval)
 		},
 	})
-	discordNotifier := discord.NewNotifier(db, discord.Options{})
+	discordNotifier := discord.NewNotifier(db, discord.Options{SkipTaskNotifications: strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")) != "" && os.Getenv("WATCHWEAVER_BOT_NOTIFICATIONS") == "true"})
 	discordEnabled, discordPreferenceSet := server.DiscordPreference(context.Background(), db)
 	if discordEnabled || (!discordPreferenceSet && cfg.DiscordWebhookURL != "") {
 		discordNotifier.Configure(discordWebhook)
@@ -115,10 +117,66 @@ func main() {
 		log.Fatalf("load remote Jellyfin connections failed: %v", err)
 	}
 	api.SetJellyfinRemotePool(jellyfinRemotes)
-	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, api))
+	botTokenProvider := api.StoredBotToken
+	botTokenOverridden := os.Getenv("WATCHWEAVER_BOT_TOKEN_FILE") != ""
+	if botTokenOverridden {
+		botTokenProvider = server.BotTokenFile(os.Getenv("WATCHWEAVER_BOT_TOKEN_FILE"))
+	}
+	api.ConfigureBotAccess(strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")) != "", botTokenOverridden)
+	var webHandler http.Handler = server.NewHandlerWithAPI(readiness, api)
+	if strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")) != "" {
+		protected, err := server.ProtectWebAccess(webHandler, server.BotTokenFile(os.Getenv("WATCHWEAVER_WEB_PASSWORD_FILE")), botTokenProvider)
+		if err != nil {
+			log.Fatalf("web access configuration: %v", err)
+		}
+		webHandler = protected
+	}
+	httpServer := server.New(cfg.ListenAddr, webHandler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if addr := strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")); addr != "" {
+		handler, err := server.NewBotHandler(api, server.BotConfig{
+			Notifications: os.Getenv("WATCHWEAVER_BOT_NOTIFICATIONS") == "true",
+			TokenProvider: botTokenProvider,
+			AllowUnpaired: !botTokenOverridden,
+			Users:         strings.Split(os.Getenv("WATCHWEAVER_BOT_USER_IDS"), ","),
+			PublicURL:     os.Getenv("WATCHWEAVER_PUBLIC_URL"),
+		})
+		if err != nil {
+			log.Fatalf("bot API configuration: %v", err)
+		}
+		botListener, err := net.Listen("tcp", addr)
+		if err != nil {
+			log.Fatalf("bot API listen failed: %v", err)
+		}
+		go func() {
+			for ctx.Err() == nil {
+				if err := api.RunBotWorker(ctx, os.Getenv("WATCHWEAVER_BOT_NOTIFICATIONS") == "true"); err != nil && ctx.Err() == nil {
+					log.Printf("bot worker paused; retrying in 30 seconds")
+				}
+				timer := time.NewTimer(30 * time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+		}()
+		botServer := server.New(addr, handler)
+		botServer.ReadHeaderTimeout = 5 * time.Second
+		botServer.ReadTimeout = 15 * time.Second
+		botServer.WriteTimeout = 30 * time.Second
+		botServer.IdleTimeout = 60 * time.Second
+		botServer.MaxHeaderBytes = 16 * 1024
+		go func() {
+			if err := server.Serve(ctx, botServer, botListener, cfg.ShutdownTimeout); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("bot API stopped unexpectedly; restart required to restore bot access")
+			}
+		}()
+	}
 
 	go func() {
 		if err := traktSync.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

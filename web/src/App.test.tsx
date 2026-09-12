@@ -47,6 +47,7 @@ const task: Task = {
     external_ids: { trakt: "9" },
   },
 };
+let botConfigured=false;
 let activeTask: Task | undefined = task;
 let serializdReviews: Array<Record<string, unknown>> = [];
 let historyTrackingSource = "trakt";
@@ -61,6 +62,7 @@ function json(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  botConfigured=false;
   activeTask = task;
   serializdReviews = [];
   historyTrackingSource = "trakt";
@@ -70,6 +72,7 @@ beforeEach(() => {
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
+      if(path==="/api/integrations/discord-bot") {if(init?.method==="POST"){botConfigured=true;return json({token:"generated-test-token"},201)};if(init?.method==="DELETE"){botConfigured=false;return Promise.resolve(new Response(null,{status:204}))};return json({enabled:true,configured:botConfigured,overridden:false});}
       if (path === "/api/integrations") return json(currentIntegrations);
       if (path === "/api/integrations/jellyfin/remotes" && !init?.method) return json({sources:currentJellyfinRemotes});
       if (path === "/api/integrations/jellyfin/remotes" && init?.method === "POST") {
@@ -80,7 +83,9 @@ beforeEach(() => {
       if (path.match(/^\/api\/integrations\/jellyfin\/remotes\/[^/]+$/) && init?.method === "DELETE") return Promise.resolve(new Response(null,{status:204}));
       if (path === "/api/setup") return json({ complete: true, encrypted_storage: true, trakt: { configured: true, authorization_status: "connected", client_id_overridden: false, client_secret_overridden: false }, discord: { configured: true, enabled: false, webhook_overridden: false } });
       if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
-      if (path === "/api/inbox")
+      if (path === "/api/tasks/4") return json({media:task.media,task:activeTask});
+      if (path === "/api/media/9") return json({media:task.media,rating:8,revision:1});
+      if (path === "/api/inbox" || path === "/api/inbox?task_id=4")
         return json({
           page: 1,
           per_page: 50,
@@ -370,8 +375,7 @@ describe("WatchWeaver dashboard", () => {
     fireEvent.change(screen.getByRole("slider"), { target: { value: "9" } });
     fireEvent.change(screen.getByLabelText("Review for This movie"), { target: { value: "Excellent." } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/media/9/rating", expect.objectContaining({ method: "PUT", body: JSON.stringify({ rating: 9 }) })));
-    expect(fetch).toHaveBeenCalledWith("/api/media/9/review", expect.objectContaining({ method: "PUT", body: JSON.stringify({ body: "Excellent." }) }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/media/9/edit", expect.objectContaining({ method: "POST", body: JSON.stringify({ rating: 9, review:"Excellent.", revision:1 }) })));
   });
   it("runs Trakt synchronization from settings", async () => {
     render(<App />);
@@ -574,4 +578,40 @@ describe("WatchWeaver dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/update?force=1", expect.anything()));
   });
+});
+
+describe("direct application links",()=>{
+ it("opens a pending task and its completion controls",async()=>{
+  window.history.replaceState(null,"","/tasks/4");render(<App/>);
+  expect(await screen.findByText("Task status:")).toBeInTheDocument();
+  expect(await screen.findByRole("button",{name:"Save & complete"})).toBeInTheDocument();
+ });
+ it("opens the exact media editor without loading history",async()=>{
+  window.history.replaceState(null,"","/media/9");render(<App/>);
+  expect(await screen.findByRole("textbox",{name:"Review for This movie"})).toBeInTheDocument();
+  expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).startsWith("/api/history"))).toBe(false);
+ });
+ it("focuses the relevant integration settings section",async()=>{
+  window.history.replaceState(null,"","/settings/trakt");render(<App/>);
+  await waitFor(()=>expect(document.activeElement?.id).toBe("settings-trakt"));
+ });
+});
+
+describe("bot pairing and route states",()=>{
+ it("shows a generated token once and removes it on dismissal",async()=>{
+  window.history.replaceState(null,"","/settings/discord");render(<App/>);
+  fireEvent.click(await screen.findByRole("button",{name:"Create API token"}));
+  expect(await screen.findByLabelText("New bot API token")).toHaveValue("generated-test-token");
+  fireEvent.click(screen.getByRole("button",{name:"Dismiss token"}));expect(screen.queryByLabelText("New bot API token")).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"Replace API token"})).toBeInTheDocument();
+ });
+ it.each(["completed","skipped","snoozed"] as const)("opens a %s task directly",async(state)=>{
+  activeTask={...task,state};window.history.replaceState(null,"","/tasks/4");render(<App/>);
+  expect(await screen.findByText(state,{selector:"strong"})).toBeInTheDocument();
+  if(state!=="snoozed")expect(screen.queryByRole("button",{name:"Save & complete"})).not.toBeInTheDocument();
+ });
+ it("offers recovery for a missing resource",async()=>{
+  window.history.replaceState(null,"","/media/987654");render(<App/>);
+  expect(await screen.findByText("Item unavailable")).toBeInTheDocument();expect(screen.getByRole("link",{name:"Open inbox"})).toHaveAttribute("href","/inbox");
+ });
 });

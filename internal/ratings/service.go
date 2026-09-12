@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/thef4tdaddy/watchweaver/internal/workflow"
 	"strings"
 	"time"
 )
@@ -89,38 +90,16 @@ func (s *Service) SetLocal(ctx context.Context, mediaID int64, value int) error 
 	if err := s.validateTarget(ctx, mediaID); err != nil {
 		return err
 	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO ratings(media_id,rating,source,local_updated_at) VALUES(?,?,'local',?) ON CONFLICT(media_id) DO UPDATE SET rating=excluded.rating,source='local',local_updated_at=excluded.local_updated_at`, mediaID, value, now); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO rating_sync_state(media_id,last_local_change_at,pending_rating,pending_delete,attempt_count,next_attempt_at,last_error) VALUES(?,?,?,0,0,?,NULL) ON CONFLICT(media_id) DO UPDATE SET last_local_change_at=excluded.last_local_change_at,pending_rating=excluded.pending_rating,pending_delete=0,attempt_count=0,next_attempt_at=excluded.next_attempt_at,last_error=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, mediaID, now, value, now); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := workflow.NewWithClock(s.db, s.now).Apply(ctx, workflow.Command{Target: "media", ID: mediaID, Action: "rating", Rating: &value}, "", "")
+	return err
 }
 
 func (s *Service) DeleteLocal(ctx context.Context, mediaID int64) error {
 	if err := s.validateTarget(ctx, mediaID); err != nil {
 		return err
 	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `DELETE FROM ratings WHERE media_id=?`, mediaID); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO rating_sync_state(media_id,last_local_change_at,pending_rating,pending_delete,attempt_count,next_attempt_at,last_error) VALUES(?,?,NULL,1,0,?,NULL) ON CONFLICT(media_id) DO UPDATE SET last_local_change_at=excluded.last_local_change_at,pending_rating=NULL,pending_delete=1,attempt_count=0,next_attempt_at=excluded.next_attempt_at,last_error=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, mediaID, now, now); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := workflow.NewWithClock(s.db, s.now).Apply(ctx, workflow.Command{Target: "media", ID: mediaID, Action: "delete-rating"}, "", "")
+	return err
 }
 
 func (s *Service) SetReview(ctx context.Context, mediaID int64, body string) error {
@@ -131,8 +110,7 @@ func (s *Service) SetReview(ctx context.Context, mediaID int64, body string) err
 	if err := s.validateTarget(ctx, mediaID); err != nil {
 		return err
 	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO reviews(media_id,body,source,created_at,updated_at) VALUES(?,?,'local',?,?) ON CONFLICT(media_id) DO UPDATE SET body=excluded.body,source='local',updated_at=excluded.updated_at`, mediaID, body, now, now)
+	_, err := workflow.NewWithClock(s.db, s.now).Apply(ctx, workflow.Command{Target: "media", ID: mediaID, Action: "review", Review: &body}, "", "")
 	return err
 }
 
@@ -151,7 +129,7 @@ func (s *Service) GetReview(ctx context.Context, mediaID int64) (*Review, error)
 }
 
 func (s *Service) DeleteReview(ctx context.Context, mediaID int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM reviews WHERE media_id=?`, mediaID)
+	_, err := workflow.NewWithClock(s.db, s.now).Apply(ctx, workflow.Command{Target: "media", ID: mediaID, Action: "delete-review"}, "", "")
 	return err
 }
 

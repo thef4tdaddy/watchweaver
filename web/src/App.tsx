@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
+import { useRoute, navigate, routeView } from "./routing";
 import TraktAccessNote from "./TraktAccessNote";
 import NetworkBoundaryNote from "./NetworkBoundaryNote";
 import {
@@ -13,7 +14,6 @@ import {
   type OperationalStatus,
   type Page,
   type Rating,
-  type Review,
   type SerializdStatus,
   type SerializdReview,
   type Settings,
@@ -37,7 +37,9 @@ const backgroundRefreshMilliseconds = 15_000;
 const activeSyncRefreshMilliseconds = 3_000;
 
 function App() {
-  const [view, setView] = useState<View>("inbox");
+  const route = useRoute();
+  const view = routeView(route.pathname);
+  const setView = (value: View) => navigate(`/${value}`);
   const [inboxCount, setInboxCount] = useState(0);
   const [integrations, setIntegrations] = useState<Integrations>();
   const [jellyfinRemotes, setJellyfinRemotes] = useState<JellyfinRemote[]>([]);
@@ -49,9 +51,9 @@ function App() {
       request<Integrations>("/api/integrations")
         .then(setIntegrations)
         .catch((e) => setError(e.message)),
-    [],
+    [setError],
   );
-  const refreshUpdate = useCallback(() => request<UpdateStatus>("/api/update").then(setUpdateStatus).catch(() => undefined), []);
+  const refreshUpdate = useCallback(() => request<UpdateStatus>("/api/update").then(setUpdateStatus).catch(() => undefined), [setUpdateStatus]);
   const refreshJellyfinRemote = useCallback(() => request<JellyfinRemotes>("/api/integrations/jellyfin/remotes").then((value)=>setJellyfinRemotes(value.sources)).catch(() => undefined), []);
   const refreshInboxCount = useCallback(
     () => request<Page<Task>>("/api/inbox").then((data) => setInboxCount(data.total)).catch(() => undefined),
@@ -88,6 +90,19 @@ function App() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [integrations?.trakt.sync.running, refreshBackgroundState]);
+  useEffect(() => {
+    const section = route.pathname.split("/")[2];
+    if (!section || !route.pathname.startsWith("/settings/")) return;
+    const focus = () => {
+      const target = document.getElementById(`settings-${section}`);
+      if (!target) return false;
+      target.setAttribute("tabindex", "-1"); target.focus(); target.scrollIntoView?.(); return true;
+    };
+    if (focus()) return;
+    const observer = new MutationObserver(() => { if (focus()) observer.disconnect(); });
+    observer.observe(document.body, {childList:true, subtree:true});
+    return () => observer.disconnect();
+  }, [route.pathname]);
   const traktState = getTraktState(integrations?.trakt);
   const jellyfinState = getJellyfinState(integrations?.jellyfin, jellyfinRemotes);
   return (
@@ -143,6 +158,7 @@ function App() {
             <button type="button" aria-label="Dismiss error" onClick={() => setError("")}>×</button>
           </div>
         )}
+        {route.pathname.startsWith("/media/") || route.pathname.startsWith("/tasks/") ? <ResourcePage key={route.pathname} path={route.pathname} onError={setError} /> : view === "missing" ? <Empty title="Page not found" body="Choose a page from the navigation to continue." /> : null}
         {view === "inbox" && (
           <Inbox
             onError={setError}
@@ -151,9 +167,10 @@ function App() {
             syncError={integrations?.trakt.sync.last_error || integrations?.trakt.poll.last_error}
             integrationLoaded={integrations !== undefined}
             onCountChange={setInboxCount}
+            query={route.search}
           />
         )}{" "}
-        {view === "history" && <History onError={setError} />}{" "}
+        {view === "history" && <History onError={setError} query={route.search} />}{" "}
         {view === "movies" && <Movies onError={setError} />}{" "}
         {view === "tv" && <Television onError={setError} />}{" "}
         {view === "status" && (
@@ -443,7 +460,7 @@ function StarRating({ value, onChange, label, emptyLabel = "Choose rating" }: { 
   </div>;
 }
 
-function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, onCountChange }: { onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean; onCountChange: (count: number) => void }) {
+function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, onCountChange, query = "", onActionComplete }: { onActionComplete?:()=>void; query?: string; onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean; onCountChange: (count: number) => void }) {
   const [page, setPage] = useState<Page<Task>>();
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const [drafts, setDrafts] = useState<
@@ -454,9 +471,9 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
   const previousSyncActive = useRef(syncActive);
   const load = useCallback(async () => {
     try {
-      const data = await request<Page<Task>>("/api/inbox");
+      const data = await request<Page<Task>>(`/api/inbox${query}`);
       setPage(data);
-      onCountChange(data.total);
+      if (!query) onCountChange(data.total);
       const pairs = await Promise.all(
         data.items.map(async (task) => {
           try {
@@ -488,7 +505,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
     } catch (e) {
       onError((e as Error).message);
     }
-  }, [onCountChange, onError]);
+  }, [onCountChange, onError, query]);
   // oxlint-disable react/set-state-in-effect -- the effect starts an external API synchronization.
   useEffect(() => {
     void load();
@@ -503,9 +520,11 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
     try {
       await request(`/api/tasks/${id}/${action}`, {
         method: "POST",
+        headers:page?.items.find(t=>t.id===id)?.revision ? {"If-Match":String(page.items.find(t=>t.id===id)?.revision)}:undefined,
         body: body ? JSON.stringify(body) : undefined,
       });
       await load();
+      onActionComplete?.();
     } catch (e) {
       onError((e as Error).message);
     } finally {
@@ -543,7 +562,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
                   <div className="task-title">
                     <div>
                       <span className="tag">{task.media.type}</span>
-                      <h3>{task.media.title}</h3>
+                      <h3><a href={`/tasks/${task.id}`}>{task.media.title}</a></h3>
                       <p>{mediaLabel(task.media)}</p>
                     </div>
                     <span className={`state ${task.state}`}>{task.state}</span>
@@ -593,6 +612,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
                       }
                       onClick={() =>
                         void act(task.id, "complete", {
+                          revision:task.revision,media_revision:task.media_revision,
                           ...(task.type !== "review" && draft.rating ? { rating: draft.rating } : {}),
                           ...(task.media.type !== "episode" && task.type !== "rating" && draft.review.trim()
                             ? { review: draft.review }
@@ -627,19 +647,21 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
           })}
         </div>
       )}
+      <Pager page={page.page} pages={page.total_pages} setPage={(value)=>{const params=new URLSearchParams(query);params.set("page",String(value));navigate(`/inbox?${params}`);}}/>
     </section>
   );
 }
 
-function History({ onError }: { onError: (v: string) => void }) {
-  const [pageNo, setPageNo] = useState(1);
+function History({ onError, query = "" }: { onError: (v: string) => void; query?: string }) {
+  const pageNo = Math.max(1, Number(new URLSearchParams(query).get("page")) || 1);
+  const setPageNo = (page: number) => { const params = new URLSearchParams(query); params.set("page", String(page)); navigate(`/history?${params}`); };
   const [data, setData] = useState<Page<HistoryItem>>();
   const [editing, setEditing] = useState<number>();
   useEffect(() => {
-    request<Page<HistoryItem>>(`/api/history?page=${pageNo}&per_page=20`)
+    request<Page<HistoryItem>>(`/api/history?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(query)), page: String(pageNo), per_page: "20" })}`)
       .then(setData)
       .catch((e) => onError(e.message));
-  }, [pageNo, onError]);
+  }, [pageNo, onError, query]);
   if (!data) return <Loading />;
   return (
     <section>
@@ -674,7 +696,7 @@ function History({ onError }: { onError: (v: string) => void }) {
                   <span className="tag">{item.media.type}</span>
                   <span className={`source-badge source-${item.source}`} aria-label={`Tracking source: ${source.label}`} title={source.detail}>{source.label}</span>
                 </div>
-                <h3>{item.media.title}</h3>
+                <h3><a href={`/media/${item.media.id}`}>{item.media.title}</a></h3>
                 <p>
                   {item.media.show_title
                     ? `${item.media.show_title} · S${item.media.season_number} E${item.media.episode_number}`
@@ -698,37 +720,32 @@ function History({ onError }: { onError: (v: string) => void }) {
 function HistoryEditor({ item, onError }: { item: HistoryItem; onError: (v: string) => void }) {
   const targets = item.media.type === "episode" && item.media.season_id
     ? [{ id: item.media.id, label: "This episode", type: "episode" }, { id: item.media.season_id, label: `Season ${item.media.season_number}`, type: "season" }]
-    : [{ id: item.media.id, label: "This movie", type: "movie" }];
+    : [{ id: item.media.id, label: item.media.type === "season" ? "This season" : item.media.type === "episode" ? "This episode" : "This movie", type: item.media.type }];
   const [target, setTarget] = useState(targets[0]);
   const [rating, setRating] = useState<number>();
   const [review, setReview] = useState("");
-  const [original, setOriginal] = useState<{ rating?: number; review: string }>({ review: "" });
+  const [original, setOriginal] = useState<{ rating?: number; review: string; revision?:number }>({ review: "" });
   const [busy, setBusy] = useState(true);
   const [saved, setSaved] = useState("");
   // oxlint-disable react/set-state-in-effect -- changing targets starts an external API synchronization.
   useEffect(() => {
     setBusy(true);
     setSaved("");
-    Promise.all([
-      request<Rating>(`/api/media/${target.id}/rating`).catch((e) => e instanceof APIError && e.status === 404 ? undefined : Promise.reject(e)),
-      request<Review>(`/api/media/${target.id}/review`).catch((e) => e instanceof APIError && e.status === 404 ? undefined : Promise.reject(e)),
-    ]).then(([currentRating, currentReview]) => {
-      const value = { rating: currentRating?.rating, review: currentReview?.body || "" };
-      setRating(value.rating);
-      setReview(value.review);
-      setOriginal(value);
-    }).catch((e) => onError(e.message)).finally(() => setBusy(false));
+    request<{rating?:number;review?:string;revision:number}>(`/api/media/${target.id}`).then(current => {
+      const value = {rating:current.rating,review:current.review||"",revision:current.revision};
+      setRating(value.rating);setReview(value.review);setOriginal(value);
+    }).catch((e)=>onError(e.message)).finally(()=>setBusy(false));
   }, [target.id, onError]);
   // oxlint-enable react/set-state-in-effect
   const save = async () => {
     setBusy(true);
     setSaved("");
     try {
-      if (rating !== original.rating) await request(`/api/media/${target.id}/rating`, rating === undefined ? { method: "DELETE" } : { method: "PUT", body: JSON.stringify({ rating }) });
-      const trimmed = review.trim();
-      if (trimmed !== original.review) await request(`/api/media/${target.id}/review`, trimmed ? { method: "PUT", body: JSON.stringify({ body: trimmed }) } : { method: "DELETE" });
-      const value = { rating, review: trimmed };
-      setReview(trimmed);
+      const trimmed=review.trim();
+      await request(`/api/media/${target.id}/edit`,{method:"POST",body:JSON.stringify({rating:rating??null,review:trimmed,revision:original.revision})});
+      const current=await request<{rating?:number;review?:string;revision:number}>(`/api/media/${target.id}`);
+      const value = { rating:current.rating, review:current.review||"",revision:current.revision };
+      setRating(value.rating);setReview(value.review);
       setOriginal(value);
       setSaved("Saved");
     } catch (e) {
@@ -1227,7 +1244,7 @@ function SettingsView({
       )}
 		<div className="settings-card jellyfin-card">
 			<div className="card-heading">
-				<div><p className="eyebrow">AUTOMATED SOURCE</p><h2>Jellyfin Plugin</h2></div>
+				<div><p className="eyebrow">AUTOMATED SOURCE</p><h2 id="settings-jellyfin">Jellyfin Plugin</h2></div>
 				<span className={`state ${(jellyfinRemotes.some((source)=>source.connected) || setup.jellyfin?.configured) ? "confirmed" : "pending"}`}>{jellyfinRemotes.filter((source)=>source.connected).length + (setup.jellyfin?.configured ? 1 : 0) ? `${jellyfinRemotes.filter((source)=>source.connected).length + (setup.jellyfin?.configured ? 1 : 0)} active` : "Not configured"}</span>
 			</div>
 			<p className="jellyfin-summary">Choose a connection mode. Both can be used together, and WatchWeaver can connect to multiple Jellyfin servers.</p>
@@ -1283,7 +1300,7 @@ function SettingsView({
         <div className="card-heading">
           <div>
 			<p className="eyebrow">OPTIONAL SOURCE</p>
-            <h2>Trakt</h2>
+            <h2 id="settings-trakt">Trakt</h2>
           </div>
           <span
             className={`state ${trakt.authorization.status === "connected" ? "confirmed" : "pending"}`}
@@ -1454,7 +1471,7 @@ function SettingsView({
       </div>
       <div className="settings-card">
         <p className="eyebrow">PREFERENCES</p>
-        <h2>Local behavior</h2>
+        <h2 id="settings-preferences">Local behavior</h2>
         <p className="mobile-version">Running version: <strong>{updateStatus?.running_version || buildVersion}</strong></p>
         <label>
           Timezone
@@ -1604,11 +1621,12 @@ function SettingsView({
           Save preferences
         </button>
       </div>
+      <BotConnectionSettings onError={onError}/>
       <div className="settings-card full">
         <div className="card-heading">
           <div>
             <p className="eyebrow">OPTIONAL ANNOUNCEMENTS</p>
-            <h2>Discord</h2>
+            <h2 id="settings-discord">Discord</h2>
           </div>
           <span
             className={`state ${integrations.discord.enabled ? "confirmed" : ""}`}
@@ -1790,3 +1808,44 @@ function Pager({
   );
 }
 export default App;
+
+const ignoreCount = () => undefined;
+function ResourcePage({path,onError}:{path:string;onError:(value:string)=>void}) {
+  const [resource,setResource] = useState<{media:Task["media"]; task?:Task; ignored?:boolean;children?:Task["media"][]}>();
+  const [failed,setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    request<{media:Task["media"];task?:Task;ignored?:boolean;children?:Task["media"][]}>(`/api${path}`).then(value=>{if(active){setResource(value);setFailed(false);}}).catch(()=>{if(active)setFailed(true);});
+    return ()=>{active=false;};
+  },[path]);
+  if(failed) return <section><Empty title="Item unavailable" body="This item may have been removed or the connection is unavailable."/><a href="/inbox">Open inbox</a></section>;
+  if(!resource) return <Loading/>;
+  const {media,task}=resource;
+  const toggleIgnore = async () => {
+    try {await request(`/api/media/${media.id}/ignore`,{method:resource.ignored?"DELETE":"PUT"});setResource({...resource,ignored:!resource.ignored});}catch(e){onError((e as Error).message);}
+  };
+  return <section key={path}><h2>{mediaLabel(media)}</h2><p>{media.title}</p>{task && <p>Task status: <strong>{task.state}</strong></p>}
+    {task && (task.state === "pending" || task.state === "snoozed") ? <Inbox query={`?task_id=${task.id}`} onError={onError} syncRunning={false} integrationLoaded={true} onCountChange={ignoreCount} onActionComplete={()=>{void request<typeof resource>(`/api${path}`).then(setResource).catch((e)=>onError(e.message));}}/> : media.type !== "show" ? <HistoryEditor key={media.id} item={{media} as HistoryItem} onError={onError}/> : <p>Open a season or episode to rate or review it.</p>}
+    {resource.children?.length ? <ul>{resource.children.map(child=><li key={child.id}><a href={`/media/${child.id}`}>{mediaLabel(child)}</a></li>)}</ul> : null}
+    {(media.type==="movie"||media.type==="show")&&<button className="secondary" onClick={()=>void toggleIgnore()}>{resource.ignored?"Allow future prompts":"Ignore future prompts"}</button>}
+    <a href="/inbox">Open inbox</a>
+  </section>;
+}
+
+function BotConnectionSettings({onError}:{onError:(value:string)=>void}) {
+ const [status,setStatus]=useState<{enabled:boolean;configured:boolean;overridden:boolean;last_handshake?:string}>();
+ const [token,setToken]=useState("");const [busy,setBusy]=useState(false);
+ const load=useCallback(()=>request<NonNullable<typeof status>>("/api/integrations/discord-bot").then(setStatus),[]);
+ useEffect(()=>{void load().catch(()=>undefined);},[load]);
+ const change=async(method:string)=>{
+  if(status?.configured&&!window.confirm(method==="DELETE"?"Revoke the bot token? The bot will lose access immediately.":"Replace the bot token? Update the bot with the new token to reconnect."))return;
+  setBusy(true);setToken("");try{const result=await request<{token?:string}>("/api/integrations/discord-bot",{method});setToken(result?.token||"");await load();}catch(e){onError((e as Error).message);}finally{setBusy(false);}
+ };
+ if(!status)return null;
+ return <div className="settings-card full"><h2>Discord bot connection</h2>
+ <p>{status.enabled?"Create a token, then enter it and your WatchWeaver API address in the bot. The bot checks compatibility with a handshake.":"Enable the protected bot connection in your container configuration to pair a bot."}</p>
+ {status.last_handshake&&<p>Last successful handshake: {formatDate(status.last_handshake)}</p>}
+ {status.overridden?<p>The token is managed by your container configuration.</p>:status.enabled&&<div className="actions"><button className="primary" disabled={busy} onClick={()=>void change("POST")}>{status.configured?"Replace API token":"Create API token"}</button>{status.configured&&<button className="secondary" disabled={busy} onClick={()=>void change("DELETE")}>Revoke token</button>}</div>}
+ {token&&<div><p>Copy this token now. It will not be shown again.</p><input aria-label="New bot API token" value={token} readOnly/><button className="secondary" onClick={()=>void copyToClipboard(token).catch(e=>onError(e.message))}>Copy token</button><button className="text-button" onClick={()=>setToken("")}>Dismiss token</button></div>}
+ </div>;
+}
