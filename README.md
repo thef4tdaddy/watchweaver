@@ -131,6 +131,8 @@ Start on **Status**. It distinguishes a disconnected integration from a reminder
 
 If that is not enough, use **Status → Download diagnostics** and attach the resulting redacted report to a private support conversation or GitHub issue. It excludes credentials, URLs, user identity, titles, reviews, and raw event payloads. Container logs are also available with `docker compose logs --tail=200 watchweaver`; inspect the safe error code rather than posting an entire unreviewed log publicly.
 
+Normal container logging records startup, sync outcomes, accepted/rejected watches, failures, and periodic connection summaries without repeating every heartbeat or internal sync phase. For a temporary deeper trace, set `WATCHWEAVER_LOG_LEVEL=debug` in Compose and recreate the container. Debug mode adds phase, heartbeat, retry, and event-routing details but continues to omit credentials and raw payloads. Return it to `info` after collecting the relevant window.
+
 When an upgrade fails readiness, keep the failed container and `/data` volume intact, inspect its logs, and return to the previous image only by restoring the matching pre-upgrade database and `.key` backup pair. Running an older binary against a database already migrated by a newer version is unsupported.
 
 ## Local development commands
