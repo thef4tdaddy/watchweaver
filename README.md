@@ -58,6 +58,13 @@ https://thef4tdaddy.github.io/watchweaver-jellyfin/manifest.json
 
 Installation, compatibility, configuration, and troubleshooting instructions are maintained in the [plugin repository](https://github.com/thef4tdaddy/watchweaver-jellyfin#readme). Keep WatchWeaver and the plugin on compatible `0.x` release lines. Both services are intended for trusted LAN/VPN use and should not be exposed directly to the public internet.
 
+WatchWeaver supports two Jellyfin directions from **Settings → Jellyfin Plugin**:
+
+- **WatchWeaver → Jellyfin** is recommended for seedboxes and multiple servers. WatchWeaver connects outward to each named Jellyfin instance, so the private WatchWeaver port does not need to be reachable by the seedbox.
+- **Jellyfin → WatchWeaver** lets the plugin push to one WatchWeaver instance and is simplest when both systems can already reach each other on a trusted LAN/VPN.
+
+Both directions may be enabled together. History identifies the source and Jellyfin instance so you can tell direct Jellyfin activity from activity imported through Trakt.
+
 ## Project principles
 
 - **Self-hosted first.** Your WatchWeaver instance and its database belong on infrastructure you control.
@@ -87,6 +94,16 @@ redacted diagnostics report for troubleshooting.
 
 Published container channels are `beta` for prerelease testing and `latest` for stable releases. Immutable tags such as `0.1.0-beta.1` or `0.1.0` are recommended when you want upgrades to be explicit.
 
+### Add WatchWeaver to Homarr
+
+Create a custom app in Homarr with:
+
+- **Name:** `WatchWeaver`
+- **App URL:** the private URL you use to open WatchWeaver, for example `http://192.168.1.20:18473`
+- **Ping URL:** the same base URL plus `/readyz`, for example `http://192.168.1.20:18473/readyz`
+
+Use the WatchWeaver icon from `web/public/brand/watchweaver-icon.png` or the raw GitHub copy. Keep the app tile and ping URL limited to the same LAN/VPN access boundary as WatchWeaver.
+
 ### Back up and restore
 
 Create a consistent live SQLite backup without stopping the service:
@@ -107,6 +124,14 @@ docker compose up -d
 ```
 
 The same `/data` volume is reused and pending migrations run before readiness succeeds. Downgrades are not guaranteed; restore the pre-upgrade backup with the compatible version instead.
+
+### Troubleshooting
+
+Start on **Status**. It distinguishes a disconnected integration from a reminder-only destination and offers the relevant retry or setup action. For Jellyfin, **Settings → Jellyfin Plugin** shows each named connection, direction, latest attempt/event, retry time, safe error code, and event count.
+
+If that is not enough, use **Status → Download diagnostics** and attach the resulting redacted report to a private support conversation or GitHub issue. It excludes credentials, URLs, user identity, titles, reviews, and raw event payloads. Container logs are also available with `docker compose logs --tail=200 watchweaver`; inspect the safe error code rather than posting an entire unreviewed log publicly.
+
+When an upgrade fails readiness, keep the failed container and `/data` volume intact, inspect its logs, and return to the previous image only by restoring the matching pre-upgrade database and `.key` backup pair. Running an older binary against a database already migrated by a newer version is unsupported.
 
 ## Local development commands
 
