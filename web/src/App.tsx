@@ -92,6 +92,7 @@ function App() {
   const jellyfinState = getJellyfinState(integrations?.jellyfin, jellyfinRemotes);
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <div className="brand">
           <img className="brand-mark" src="/brand/watchweaver-icon.png" alt="" />
@@ -107,6 +108,7 @@ function App() {
               className={view === id ? "active" : ""}
               onClick={() => setView(id)}
               aria-label={label}
+              aria-current={view === id ? "page" : undefined}
               title={label}
             >
               <span className={`nav-icon ${icon}`} aria-hidden="true" />
@@ -128,7 +130,7 @@ function App() {
           />
         </div>
       </aside>
-      <main className="content">
+      <main className="content" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <div>
             <p className="eyebrow">WATCHWEAVER / {view.toUpperCase()}</p>
@@ -138,7 +140,7 @@ function App() {
         {error && (
           <div className="alert" role="alert">
             <span>{error}</span>
-            <button onClick={() => setError("")}>×</button>
+            <button type="button" aria-label="Dismiss error" onClick={() => setError("")}>×</button>
           </div>
         )}
         {view === "inbox" && (
@@ -1144,9 +1146,12 @@ function SettingsView({
     const value=await request<JellyfinRemote>(`/api/integrations/jellyfin/remotes/${source.id}`,{method:"PUT",body:JSON.stringify({name:source.name,enabled:source.enabled,url:source.url,user_id:source.user_id||"",api_key:jellyfinKeys[source.id]||""})});
     setJellyfinRemotes((current)=>current.map((item)=>item.id===value.id?value:item)); setJellyfinKeys((current)=>({...current,[source.id]:""})); return `${value.name} updated.`;
   });
-  const removeRemoteJellyfin = (source: JellyfinRemote) => runIntegrationAction(async()=>{
-    await request(`/api/integrations/jellyfin/remotes/${source.id}`,{method:"DELETE"}); setJellyfinRemotes((current)=>current.filter((item)=>item.id!==source.id)); return `${source.name} removed.`;
-  });
+  const removeRemoteJellyfin = (source: JellyfinRemote) => {
+    if (!window.confirm(`Delete the Jellyfin connection “${source.name}”?`)) return Promise.resolve();
+    return runIntegrationAction(async()=>{
+      await request(`/api/integrations/jellyfin/remotes/${source.id}`,{method:"DELETE"}); setJellyfinRemotes((current)=>current.filter((item)=>item.id!==source.id)); return `${source.name} removed.`;
+    });
+  };
   const save = async () => {
     if (!settings) return;
     if (!isValidTimezone(settings.timezone)) {
@@ -1227,8 +1232,8 @@ function SettingsView({
 			</div>
 			<p className="jellyfin-summary">Choose a connection mode. Both can be used together, and WatchWeaver can connect to multiple Jellyfin servers.</p>
 			<div className="mode-selector" role="group" aria-label="Jellyfin connection mode">
-				<button className={jellyfinMode === "connect" ? "selected" : ""} onClick={()=>setJellyfinMode("connect")}><strong>WatchWeaver → Jellyfin</strong><span>Best for seedboxes and multiple servers</span></button>
-				<button className={jellyfinMode === "push" ? "selected" : ""} onClick={()=>setJellyfinMode("push")}><strong>Jellyfin → WatchWeaver</strong><span>Plugin sends activity to WatchWeaver</span></button>
+				<button type="button" aria-pressed={jellyfinMode === "connect"} className={jellyfinMode === "connect" ? "selected" : ""} onClick={()=>setJellyfinMode("connect")}><strong>WatchWeaver → Jellyfin</strong><span>Best for seedboxes and multiple servers</span></button>
+				<button type="button" aria-pressed={jellyfinMode === "push"} className={jellyfinMode === "push" ? "selected" : ""} onClick={()=>setJellyfinMode("push")}><strong>Jellyfin → WatchWeaver</strong><span>Plugin sends activity to WatchWeaver</span></button>
 			</div>
 			{jellyfinMode === "push" ? <div className="jellyfin-method source-panel" aria-label="Plugin receiver connection">
 			<div className="source-heading"><div><p className="eyebrow">JELLYFIN → WATCHWEAVER</p><h3>Plugin receiver</h3></div><span className={`state ${setup.jellyfin?.configured ? "confirmed" : "pending"}`}>{setup.jellyfin?.configured ? "Enabled" : "Not configured"}</span></div>
