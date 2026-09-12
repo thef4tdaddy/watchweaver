@@ -111,3 +111,13 @@ func TestBotSyncJobPersistenceAndOwner(t *testing.T) {
 	}
 	t.Fatal("durable job never settled")
 }
+
+func TestTaskDetailCarriesActionVersions(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	r := f.request("GET", fmt.Sprintf("/api/tasks/%d", f.taskID), "")
+	body := decodeMap(t, r)
+	task := body["task"].(map[string]any)
+	if task["revision"] != body["revision"] || task["media_revision"] != body["media_revision"] || task["revision"] == float64(0) {
+		t.Fatal(body)
+	}
+}

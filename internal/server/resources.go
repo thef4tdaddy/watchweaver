@@ -118,6 +118,8 @@ func (a *API) resourceDetail(w http.ResponseWriter, r *http.Request, id int64, t
 
 	if task {
 		t.Media = m
+		t.Revision = taskRevision
+		t.MediaRevision = revision
 		response["task"] = t
 	}
 	writeJSON(w, http.StatusOK, response)
