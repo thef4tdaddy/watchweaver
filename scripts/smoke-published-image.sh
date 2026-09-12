@@ -13,6 +13,10 @@ cleanup() {
   docker rm -f "${container}" >/dev/null 2>&1 || true
   docker volume rm "${volume}" >/dev/null 2>&1 || true
 }
+cleanup_images() {
+  docker image rm "${image}" >/dev/null 2>&1 || true
+  if [[ -n "${previous_image}" ]]; then docker image rm "${previous_image}" >/dev/null 2>&1 || true; fi
+}
 trap cleanup EXIT
 cleanup
 
@@ -70,3 +74,5 @@ if [[ -n "${previous_image}" ]]; then
 fi
 
 echo "Smoke test passed: image=${image} platform=${platform} version=${version} graceful_shutdown_seconds=${elapsed} upgrade_fixture=${previous_image:-none}"
+cleanup
+cleanup_images
