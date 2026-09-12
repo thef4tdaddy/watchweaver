@@ -357,6 +357,18 @@ function getJellyfinState(value?: Integrations["jellyfin"], remotes: JellyfinRem
   if (probed) return { ok: true, label: "Connected · waiting", detail: "Jellyfin plugin → WatchWeaver" };
   return { ok: true, label: "Ready", detail: "Jellyfin plugin → WatchWeaver" };
 }
+
+function jellyfinRemoteStateLabel(source: JellyfinRemote) {
+  const labels: Record<string, string> = {
+    not_configured: "Not configured",
+    disabled: "Disabled",
+    connecting: "Connecting",
+    connected_waiting: "Connected · waiting",
+    receiving: "Receiving",
+    reconnecting: "Reconnecting",
+  };
+  return labels[source.state || ""] || (source.connected ? "Connected" : source.enabled ? "Connecting" : "Disabled");
+}
 function humanStatus(value?: string) {
   if (value === "needs_attention") return "Action needed";
   return (value || "not configured").replaceAll("_", " ");
@@ -1238,7 +1250,7 @@ function SettingsView({
 				<div className="source-heading"><div><p className="eyebrow">WATCHWEAVER → JELLYFIN</p><h3>Your Jellyfin servers</h3></div><span className={`state ${jellyfinRemotes.some((source)=>source.connected) ? "confirmed" : "pending"}`}>{jellyfinRemotes.length ? `${jellyfinRemotes.filter((source)=>source.connected).length}/${jellyfinRemotes.length} connected` : "None added"}</span></div>
 				<p>WatchWeaver connects outward to each server, so WatchWeaver does not need to be exposed.</p>
 				{jellyfinRemotes.map((source)=><div className="remote-source" key={source.id} aria-label={`Jellyfin source ${source.name}`}>
-					<div className="remote-source-heading"><div><strong>{source.name}</strong><small>{source.url}</small></div><span className={`state ${source.connected ? "confirmed" : "pending"}`}>{source.connected ? "Connected" : source.enabled ? "Reconnecting" : "Disabled"}</span></div>
+					<div className="remote-source-heading"><div><strong>{source.name}</strong><small>{source.url}</small><small>Mode: WatchWeaver → Jellyfin</small></div><span className={`state ${source.connected ? "confirmed" : "pending"}`}>{jellyfinRemoteStateLabel(source)}</span></div>
 					<div className="two-col jellyfin-fields">
 					<label>Connection name<input value={source.name} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,name:event.target.value}:item))}/></label>
 					<label>Jellyfin URL<input type="url" value={source.url||""} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,url:event.target.value}:item))}/></label>
@@ -1246,7 +1258,7 @@ function SettingsView({
 					<label>Jellyfin user ID (optional)<input value={source.user_id||""} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,user_id:event.target.value}:item))}/></label>
 					</div>
 					<label className="inline-check"><input type="checkbox" checked={source.enabled} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,enabled:event.target.checked}:item))}/> Keep this connection enabled</label>
-					<div className="connection-info compact"><StatusDot ok={source.connected} label={source.connected ? "Stream connected" : source.enabled ? "Reconnecting" : "Disabled"}/>{source.last_event_at&&<p>Last event {formatDate(source.last_event_at)} · {source.events_received} received</p>}{source.last_error&&<small className="warning">{source.last_error}</small>}</div>
+					<div className="connection-info compact"><StatusDot ok={source.connected} label={source.connected ? source.events_received ? "Receiving events" : "Connected · waiting for the first event" : source.enabled ? "Connecting" : "Disabled"}/><div className="connection-timeline">{source.last_attempt_at&&<small>Last attempt: {formatDate(source.last_attempt_at)}</small>}{source.last_connected_at&&<small>Last connected: {formatDate(source.last_connected_at)}</small>}{source.last_event_at&&<small>Last event: {formatDate(source.last_event_at)}</small>}{source.next_retry_at&&<small>Next retry: {formatDate(source.next_retry_at)}</small>}<small>{source.events_received} events received · {source.reconnect_count} reconnects</small></div>{source.last_error&&<small className="warning">{source.last_error_code && <strong>{source.last_error_code.replaceAll("_", " ")}: </strong>}{source.last_error}</small>}</div>
 					<div className="settings-actions"><button className="primary" disabled={integrationBusy||!source.name||!source.url} onClick={()=>void updateRemoteJellyfin(source)}>Save changes</button><button className="secondary" disabled={integrationBusy} onClick={()=>void testRemoteJellyfin(source.id,source.name)}>Test</button><button className="secondary danger" disabled={integrationBusy} onClick={()=>void removeRemoteJellyfin(source)}>Delete</button></div>
 				</div>)}
 				{(!jellyfinRemotes.length || jellyfinAddOpen) ? <div className="jellyfin-add-form">

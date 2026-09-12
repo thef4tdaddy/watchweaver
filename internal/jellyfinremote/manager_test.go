@@ -2,6 +2,7 @@ package jellyfinremote
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -15,6 +16,29 @@ type accepter struct{ events []jellyfin.Event }
 func (a *accepter) Accept(_ context.Context, e jellyfin.Event) (jellyfin.Result, error) {
 	a.events = append(a.events, e)
 	return jellyfin.Result{}, nil
+}
+
+func TestConnectionErrorsUseStableSafeCodesAndGuidance(t *testing.T) {
+	tests := []struct {
+		err           error
+		code, message string
+	}{
+		{errors.New("Jellyfin event stream returned HTTP 401"), "authentication_failed", "API key"},
+		{errors.New("Jellyfin event stream returned HTTP 404"), "plugin_endpoint_missing", "plugin"},
+		{errors.New("Get https://private.example/api/watchweaver/events: connection refused"), "network_unreachable", "could not reach"},
+	}
+	for _, test := range tests {
+		if got := errorCode(test.err); got != test.code {
+			t.Errorf("code=%q want=%q", got, test.code)
+		}
+		message := safeError(test.err)
+		if !strings.Contains(message, test.message) {
+			t.Errorf("message=%q missing %q", message, test.message)
+		}
+		if strings.Contains(message, "private.example") {
+			t.Errorf("safe message leaked URL: %q", message)
+		}
+	}
 }
 
 func TestParseSSEIgnoresControlFramesAndAcceptsEvent(t *testing.T) {
