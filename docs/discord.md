@@ -1,5 +1,13 @@
 # Discord Integration
 
+## Standalone bot connection (development)
+
+The optional authenticated API for the separate `WatchWeaver-DiscordBot` container
+is documented in [bot-api.md](bot-api.md). It supports everyday workflows and
+stable deep links. Settings, exports, transfers, and destination confirmations
+remain app-only. This supersedes those parts of the deferred roadmap below;
+the v0.1 webhook-only release boundary remains unchanged.
+
 ## Status
 
 This document defines the Discord scope for WatchWeaver v0.1 and the boundary for later interactive bot functionality.

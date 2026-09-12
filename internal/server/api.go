@@ -20,6 +20,7 @@ import (
 	"github.com/thef4tdaddy/watchweaver/internal/ratings"
 	"github.com/thef4tdaddy/watchweaver/internal/serializd"
 	"github.com/thef4tdaddy/watchweaver/internal/trakt"
+	"github.com/thef4tdaddy/watchweaver/internal/workflow"
 )
 
 const maxRequestBody = 1 << 20
@@ -97,6 +98,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })
 	mux.HandleFunc("/api/inbox", a.inbox)
 	mux.HandleFunc("/api/history", a.history)
+	mux.HandleFunc("GET /api/media", a.searchMedia)
 	mux.HandleFunc("/api/tasks/", a.taskAction)
 	mux.HandleFunc("/api/media/", a.mediaResource)
 	mux.HandleFunc("/api/settings", a.settings)
@@ -335,8 +337,30 @@ func (a *API) inbox(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	filter := ""
+	args := []any{}
+	if raw := r.URL.Query().Get("task_id"); raw != "" {
+		id, valid := positiveID(w, raw)
+		if !valid {
+			return
+		}
+		filter += " AND t.id=?"
+		args = append(args, id)
+	}
+	if kind := r.URL.Query().Get("type"); kind != "" {
+		if kind != "movie" && kind != "season" && kind != "episode" {
+			badRequest(w, "invalid type")
+			return
+		}
+		filter += " AND m.media_type=?"
+		args = append(args, kind)
+	}
+	if q := r.URL.Query().Get("q"); q != "" {
+		filter += " AND (m.title LIKE ? OR p.title LIKE ? OR gp.title LIKE ?)"
+		args = append(args, "%"+q+"%", "%"+q+"%", "%"+q+"%")
+	}
 	var total int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM prompt_tasks WHERE state IN ('pending','snoozed')`).Scan(&total); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM prompt_tasks t JOIN media_items m ON m.id=t.media_id LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id WHERE t.state IN ('pending','snoozed')`+filter, args...).Scan(&total); err != nil {
 		internalError(w)
 		return
 	}
@@ -344,7 +368,7 @@ func (a *API) inbox(w http.ResponseWriter, r *http.Request) {
 		CASE WHEN m.media_type='season' THEN p.title WHEN m.media_type='episode' THEN gp.title ELSE '' END
 		FROM prompt_tasks t JOIN media_items m ON m.id=t.media_id
 		LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id
-		WHERE t.state IN ('pending','snoozed') ORDER BY t.created_at ASC,t.id ASC LIMIT ? OFFSET ?`, perPage, (page-1)*perPage)
+		WHERE t.state IN ('pending','snoozed')`+filter+` ORDER BY t.created_at ASC,t.id ASC LIMIT ? OFFSET ?`, append(args, perPage, (page-1)*perPage)...)
 	if err != nil {
 		internalError(w)
 		return
@@ -382,15 +406,29 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	filter := ""
+	args := []any{}
+	if q := r.URL.Query().Get("q"); q != "" {
+		filter += " AND (m.title LIKE ? OR p.title LIKE ? OR gp.title LIKE ?)"
+		args = append(args, "%"+q+"%", "%"+q+"%", "%"+q+"%")
+	}
+	if kind := r.URL.Query().Get("type"); kind != "" {
+		if kind != "movie" && kind != "episode" && kind != "season" {
+			badRequest(w, "invalid media type")
+			return
+		}
+		filter += " AND m.media_type=?"
+		args = append(args, kind)
+	}
 	var total int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM watch_events WHERE deleted_at IS NULL`).Scan(&total); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM watch_events w JOIN media_items m ON m.id=w.media_id LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id WHERE w.deleted_at IS NULL`+filter, args...).Scan(&total); err != nil {
 		internalError(w)
 		return
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT w.id,w.source,w.source_event_id,w.source_instance_name,w.watched_at_utc,w.source_watched_at,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,CASE WHEN m.media_type='episode' THEN p.id END,
 		CASE WHEN m.media_type='season' THEN p.title WHEN m.media_type='episode' THEN gp.title ELSE '' END
 		FROM watch_events w JOIN media_items m ON m.id=w.media_id LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id
-		WHERE w.deleted_at IS NULL ORDER BY w.watched_at_utc DESC,w.id DESC LIMIT ? OFFSET ?`, perPage, (page-1)*perPage)
+		WHERE w.deleted_at IS NULL`+filter+` ORDER BY w.watched_at_utc DESC,w.id DESC LIMIT ? OFFSET ?`, append(args, perPage, (page-1)*perPage)...)
 	if err != nil {
 		internalError(w)
 		return
@@ -427,6 +465,13 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) taskAction(w http.ResponseWriter, r *http.Request) {
+	if parts := pathParts(r.URL.Path, "/api/tasks/"); len(parts) == 1 {
+		if id, ok := positiveID(w, parts[0]); ok {
+			a.resourceDetail(w, r, id, true)
+		}
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
 		return
@@ -484,87 +529,26 @@ func (a *API) completeTask(w http.ResponseWriter, r *http.Request, id int64) {
 		badRequest(w, "review must not be empty")
 		return
 	}
-	tx, err := a.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		internalError(w)
-		return
-	}
-	defer tx.Rollback()
-	var mediaID int64
-	var state string
-	if err = tx.QueryRowContext(r.Context(), `SELECT media_id,state FROM prompt_tasks WHERE id=?`, id).Scan(&mediaID, &state); err == sql.ErrNoRows {
-		notFound(w)
-		return
-	} else if err != nil {
-		internalError(w)
-		return
-	}
-	if state != "pending" && state != "snoozed" {
-		conflict(w, "task is already resolved")
-		return
-	}
-	var mediaType string
-	if err = tx.QueryRowContext(r.Context(), `SELECT media_type FROM media_items WHERE id=?`, mediaID).Scan(&mediaType); err != nil {
-		internalError(w)
-		return
-	}
-	if mediaType != "movie" && mediaType != "season" && mediaType != "episode" {
-		badRequest(w, "unsupported media target")
-		return
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if body.Rating != nil {
-		if _, err = tx.ExecContext(r.Context(), `INSERT INTO ratings(media_id,rating,source,local_updated_at) VALUES(?,?,'local',?) ON CONFLICT(media_id) DO UPDATE SET rating=excluded.rating,source='local',local_updated_at=excluded.local_updated_at`, mediaID, *body.Rating, now); err != nil {
-			internalError(w)
-			return
-		}
-		if _, err = tx.ExecContext(r.Context(), `INSERT INTO rating_sync_state(media_id,last_local_change_at,pending_rating,pending_delete,attempt_count,next_attempt_at,last_error) VALUES(?,?,?,0,0,?,NULL) ON CONFLICT(media_id) DO UPDATE SET last_local_change_at=excluded.last_local_change_at,pending_rating=excluded.pending_rating,pending_delete=0,attempt_count=0,next_attempt_at=excluded.next_attempt_at,last_error=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`, mediaID, now, *body.Rating, now); err != nil {
-			internalError(w)
-			return
-		}
-	}
-	if body.Review != nil {
-		review := strings.TrimSpace(*body.Review)
-		if _, err = tx.ExecContext(r.Context(), `INSERT INTO reviews(media_id,body,source,created_at,updated_at) VALUES(?,?,'local',?,?) ON CONFLICT(media_id) DO UPDATE SET body=excluded.body,source='local',updated_at=excluded.updated_at`, mediaID, review, now, now); err != nil {
-			internalError(w)
-			return
-		}
-	}
-	if _, err = tx.ExecContext(r.Context(), `UPDATE prompt_tasks SET state='completed',snoozed_until=NULL,updated_at=? WHERE id=?`, now, id); err != nil {
-		internalError(w)
-		return
-	}
-	if err = tx.Commit(); err != nil {
-		internalError(w)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "state": "completed", "media_id": mediaID})
+
+	a.applyWorkflow(w, r, workflow.Command{Target: "task", ID: id, Action: "complete", Rating: body.Rating, Review: body.Review})
 }
 
 func (a *API) transitionTask(w http.ResponseWriter, r *http.Request, id int64, state string, snooze *string) {
-	res, err := a.db.ExecContext(r.Context(), `UPDATE prompt_tasks SET state=?,snoozed_until=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND state IN ('pending','snoozed')`, state, snooze, id)
-	if err != nil {
-		internalError(w)
-		return
+	action := "skip"
+	if state == "snoozed" {
+		action = "snooze"
 	}
-	changed, _ := res.RowsAffected()
-	if changed == 0 {
-		var exists int
-		if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM prompt_tasks WHERE id=?`, id).Scan(&exists); err != nil {
-			internalError(w)
-			return
-		}
-		if exists == 0 {
-			notFound(w)
-		} else {
-			conflict(w, "task is already resolved")
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "state": state, "snoozed_until": snooze})
+	a.applyWorkflow(w, r, workflow.Command{Target: "task", ID: id, Action: action, Until: snooze})
 }
 
 func (a *API) mediaResource(w http.ResponseWriter, r *http.Request) {
+	if parts := pathParts(r.URL.Path, "/api/media/"); len(parts) == 1 {
+		if id, ok := positiveID(w, parts[0]); ok {
+			a.resourceDetail(w, r, id, false)
+		}
+		return
+	}
+
 	parts := pathParts(r.URL.Path, "/api/media/")
 	if len(parts) != 2 {
 		notFound(w)
@@ -581,6 +565,14 @@ func (a *API) mediaResource(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		internalError(w)
+		return
+	}
+	if parts[1] == "ignore" && (r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+		action := "ignore"
+		if r.Method == http.MethodDelete {
+			action = "unignore"
+		}
+		a.applyWorkflow(w, r, workflow.Command{Target: "media", ID: id, Action: action})
 		return
 	}
 	if mediaType != "movie" && mediaType != "season" && mediaType != "episode" {

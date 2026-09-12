@@ -19,20 +19,22 @@ import (
 const DefaultInterval = time.Minute
 
 type Options struct {
-	WebhookURL string
-	HTTPClient *http.Client
-	Interval   time.Duration
-	Now        func() time.Time
+	SkipTaskNotifications bool
+	WebhookURL            string
+	HTTPClient            *http.Client
+	Interval              time.Duration
+	Now                   func() time.Time
 }
 
 type Notifier struct {
-	db         *sql.DB
-	mu         sync.RWMutex
-	webhookURL string
-	httpClient *http.Client
-	interval   time.Duration
-	now        func() time.Time
-	serializd  *serializd.Service
+	skipTaskNotifications bool
+	db                    *sql.DB
+	mu                    sync.RWMutex
+	webhookURL            string
+	httpClient            *http.Client
+	interval              time.Duration
+	now                   func() time.Time
+	serializd             *serializd.Service
 }
 
 func (n *Notifier) Configure(webhookURL string) {
@@ -65,7 +67,7 @@ func NewNotifier(db *sql.DB, options Options) *Notifier {
 	}
 	service := serializd.NewService(db)
 	service.SetNow(options.Now)
-	return &Notifier{db: db, webhookURL: strings.TrimSpace(options.WebhookURL), httpClient: &client, interval: options.Interval, now: options.Now, serializd: service}
+	return &Notifier{skipTaskNotifications: options.SkipTaskNotifications, db: db, webhookURL: strings.TrimSpace(options.WebhookURL), httpClient: &client, interval: options.Interval, now: options.Now, serializd: service}
 }
 
 func (n *Notifier) Run(ctx context.Context) error {
@@ -86,8 +88,10 @@ func (n *Notifier) Poll(ctx context.Context) error {
 	if !n.Configured() {
 		return nil
 	}
-	if err := n.pollTasks(ctx); err != nil {
-		return err
+	if !n.skipTaskNotifications {
+		if err := n.pollTasks(ctx); err != nil {
+			return err
+		}
 	}
 	return n.pollSerializd(ctx)
 }

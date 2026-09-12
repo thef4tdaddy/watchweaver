@@ -80,7 +80,9 @@ beforeEach(() => {
       if (path.match(/^\/api\/integrations\/jellyfin\/remotes\/[^/]+$/) && init?.method === "DELETE") return Promise.resolve(new Response(null,{status:204}));
       if (path === "/api/setup") return json({ complete: true, encrypted_storage: true, trakt: { configured: true, authorization_status: "connected", client_id_overridden: false, client_secret_overridden: false }, discord: { configured: true, enabled: false, webhook_overridden: false } });
       if (path === "/api/update" || path === "/api/update?force=1") return json({ state: "beta_update_available", running_version: "0.1.0-beta.1", latest_version: "0.1.0-beta.2", release_url: "https://example/releases/2", channel: "beta", checked_at: "2026-09-02T12:00:00Z", enabled: true });
-      if (path === "/api/inbox")
+      if (path === "/api/tasks/4") return json({media:task.media,task:activeTask});
+      if (path === "/api/media/9") return json({media:task.media});
+      if (path === "/api/inbox" || path === "/api/inbox?task_id=4")
         return json({
           page: 1,
           per_page: 50,
@@ -574,4 +576,21 @@ describe("WatchWeaver dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/update?force=1", expect.anything()));
   });
+});
+
+describe("direct application links",()=>{
+ it("opens a pending task and its completion controls",async()=>{
+  window.history.replaceState(null,"","/tasks/4");render(<App/>);
+  expect(await screen.findByText("Task status:")).toBeInTheDocument();
+  expect(await screen.findByRole("button",{name:"Save & complete"})).toBeInTheDocument();
+ });
+ it("opens the exact media editor without loading history",async()=>{
+  window.history.replaceState(null,"","/media/9");render(<App/>);
+  expect(await screen.findByRole("textbox",{name:"Review for This movie"})).toBeInTheDocument();
+  expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).startsWith("/api/history"))).toBe(false);
+ });
+ it("focuses the relevant integration settings section",async()=>{
+  window.history.replaceState(null,"","/settings/trakt");render(<App/>);
+  await waitFor(()=>expect(document.activeElement?.id).toBe("settings-trakt"));
+ });
 });
