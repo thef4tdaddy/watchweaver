@@ -80,8 +80,12 @@ func TestMultipleRemoteJellyfinSourcesAreIndependentAndRedacted(t *testing.T) {
 		}
 	}
 	rr := f.request(http.MethodGet, "/api/integrations/jellyfin/remotes", "")
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Local Jellyfin") || !strings.Contains(rr.Body.String(), "Seedbox Jellyfin") || strings.Contains(rr.Body.String(), "local-secret") || strings.Contains(rr.Body.String(), "seedbox-secret") {
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Local Jellyfin") || !strings.Contains(rr.Body.String(), "Seedbox Jellyfin") || !strings.Contains(rr.Body.String(), `"mode":"watchweaver_to_jellyfin"`) || !strings.Contains(rr.Body.String(), `"state":"connecting"`) || strings.Contains(rr.Body.String(), "local-secret") || strings.Contains(rr.Body.String(), "seedbox-secret") {
 		t.Fatalf("list: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = f.request(http.MethodGet, "/api/diagnostics", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"jellyfin_sources"`) || !strings.Contains(rr.Body.String(), `"mode":"watchweaver_to_jellyfin"`) || strings.Contains(rr.Body.String(), "Local Jellyfin") || strings.Contains(rr.Body.String(), "seedbox.example") || strings.Contains(rr.Body.String(), "secret") {
+		t.Fatalf("diagnostics were not safely redacted: %d %s", rr.Code, rr.Body.String())
 	}
 	var sources, storedCredentials int
 	if err := f.db.QueryRow(`SELECT COUNT(*) FROM jellyfin_remote_sources`).Scan(&sources); err != nil || sources != 2 {

@@ -223,7 +223,52 @@ func (a *API) remoteSources(ctx context.Context) ([]map[string]any, error) {
 
 func (a *API) publicRemote(source jellyfinRemoteSource) map[string]any {
 	status, _ := a.jellyfinRemotes.Status(source.ID)
-	return map[string]any{"id": source.ID, "name": source.Name, "configured": source.URL != "" && source.APIKey != "", "enabled": source.Enabled, "url": source.URL, "user_id": source.UserID, "connected": status.Connected, "last_connected_at": status.LastConnectedAt, "last_event_at": status.LastEventAt, "last_error": status.LastError, "reconnect_count": status.ReconnectCount, "events_received": status.EventsReceived, "protocol_version": 1}
+	configured := source.URL != "" && source.APIKey != ""
+	return map[string]any{"id": source.ID, "name": source.Name, "mode": "watchweaver_to_jellyfin", "state": remoteState(configured, source.Enabled, status), "configured": configured, "enabled": source.Enabled, "url": source.URL, "user_id": source.UserID, "connected": status.Connected, "last_attempt_at": status.LastAttemptAt, "last_connected_at": status.LastConnectedAt, "last_event_at": status.LastEventAt, "next_retry_at": status.NextRetryAt, "last_error_code": status.LastErrorCode, "last_error": status.LastError, "reconnect_count": status.ReconnectCount, "events_received": status.EventsReceived, "protocol_version": 1}
+}
+
+func remoteState(configured, enabled bool, status jellyfinremote.Status) string {
+	if !configured {
+		return "not_configured"
+	}
+	if !enabled {
+		return "disabled"
+	}
+	if status.Connected && status.EventsReceived > 0 {
+		return "receiving"
+	}
+	if status.Connected {
+		return "connected_waiting"
+	}
+	if status.LastErrorCode != "" {
+		return "reconnecting"
+	}
+	return "connecting"
+}
+
+func (a *API) jellyfinRemoteDiagnostics(ctx context.Context) []map[string]any {
+	if a.jellyfinRemotes == nil {
+		return nil
+	}
+	rows, err := a.db.QueryContext(ctx, `SELECT id,enabled FROM jellyfin_remote_sources ORDER BY created_at,id`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	result := make([]map[string]any, 0)
+	for rows.Next() {
+		var id string
+		var enabled int
+		if rows.Scan(&id, &enabled) != nil {
+			return result
+		}
+		status, ok := a.jellyfinRemotes.Status(id)
+		if !ok {
+			continue
+		}
+		result = append(result, map[string]any{"mode": "watchweaver_to_jellyfin", "enabled": enabled == 1, "connected": status.Connected, "last_attempt_at": status.LastAttemptAt, "last_connected_at": status.LastConnectedAt, "last_event_at": status.LastEventAt, "next_retry_at": status.NextRetryAt, "last_error_code": status.LastErrorCode, "reconnect_count": status.ReconnectCount, "events_received": status.EventsReceived, "protocol_version": status.ProtocolVersion})
+	}
+	return result
 }
 
 func remoteConfig(source jellyfinRemoteSource) jellyfinremote.Config {

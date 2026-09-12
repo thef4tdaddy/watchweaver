@@ -31,7 +31,10 @@ type Status struct {
 	URL             string     `json:"url,omitempty"`
 	UserID          string     `json:"user_id,omitempty"`
 	LastConnectedAt *time.Time `json:"last_connected_at,omitempty"`
+	LastAttemptAt   *time.Time `json:"last_attempt_at,omitempty"`
 	LastEventAt     *time.Time `json:"last_event_at,omitempty"`
+	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
+	LastErrorCode   string     `json:"last_error_code,omitempty"`
 	LastError       string     `json:"last_error,omitempty"`
 	ReconnectCount  int64      `json:"reconnect_count"`
 	EventsReceived  int64      `json:"events_received"`
@@ -69,6 +72,10 @@ func (m *Manager) Configure(cfg Config) {
 	m.status.Enabled = cfg.Enabled
 	m.status.URL = cfg.URL
 	m.status.UserID = cfg.UserID
+	m.status.Connected = false
+	m.status.LastErrorCode = ""
+	m.status.LastError = ""
+	m.status.NextRetryAt = nil
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -133,12 +140,18 @@ func (m *Manager) Run(ctx context.Context) error {
 		}
 		m.mu.Lock()
 		m.status.Connected = false
-		if err != nil {
+		m.status.NextRetryAt = nil
+		if err != nil && !errors.Is(err, context.Canceled) {
+			nextRetry := time.Now().UTC().Add(backoff)
+			m.status.LastErrorCode = errorCode(err)
 			m.status.LastError = safeError(err)
+			m.status.NextRetryAt = &nextRetry
 			m.status.ReconnectCount++
 		}
 		m.mu.Unlock()
-		log.Printf("Jellyfin remote stream disconnected; retry_in=%s reason=%s", backoff, safeError(err))
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("Jellyfin remote stream disconnected; retry_in=%s code=%s", backoff, errorCode(err))
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -161,6 +174,11 @@ func (m *Manager) consume(ctx context.Context, cfg Config) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/watchweaver/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("X-Emby-Token", cfg.APIKey)
+	attempted := time.Now().UTC()
+	m.mu.Lock()
+	m.status.LastAttemptAt = &attempted
+	m.status.NextRetryAt = nil
+	m.mu.Unlock()
 	res, err := m.client.Do(req)
 	if err != nil {
 		return err
@@ -173,7 +191,9 @@ func (m *Manager) consume(ctx context.Context, cfg Config) error {
 	m.mu.Lock()
 	m.status.Connected = true
 	m.status.LastConnectedAt = &now
+	m.status.LastErrorCode = ""
 	m.status.LastError = ""
+	m.status.NextRetryAt = nil
 	m.mu.Unlock()
 	log.Printf("Jellyfin remote stream connected")
 	err = parseSSE(res.Body, func(name string, data []byte) error {
@@ -256,9 +276,43 @@ func safeError(err error) string {
 	if err == nil {
 		return "connection closed"
 	}
-	value := err.Error()
-	if len(value) > 240 {
-		return value[:240]
+	switch errorCode(err) {
+	case "authentication_failed":
+		return "Jellyfin rejected the API key. Create a new Jellyfin API key and save this connection again."
+	case "plugin_endpoint_missing":
+		return "The WatchWeaver plugin event endpoint was not found. Install or update the plugin on this Jellyfin server."
+	case "invalid_url":
+		return "The Jellyfin URL is invalid. Enter the server base URL including http:// or https://."
+	case "network_unreachable":
+		return "WatchWeaver could not reach this Jellyfin server. Check its URL, DNS, firewall, and TLS certificate."
+	case "invalid_stream":
+		return "Jellyfin returned an invalid WatchWeaver event stream. Check plugin compatibility."
+	case "ingestion_failed":
+		return "WatchWeaver could not store an event from this server and will retry."
+	default:
+		return "The Jellyfin event stream closed unexpectedly. WatchWeaver will reconnect automatically."
 	}
-	return value
+}
+
+func errorCode(err error) string {
+	if err == nil || errors.Is(err, io.EOF) {
+		return "stream_closed"
+	}
+	value := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(value, "absolute http"):
+		return "invalid_url"
+	case strings.Contains(value, "http 401"), strings.Contains(value, "http 403"):
+		return "authentication_failed"
+	case strings.Contains(value, "http 404"):
+		return "plugin_endpoint_missing"
+	case strings.Contains(value, "decode jellyfin stream"), strings.Contains(value, "token too long"):
+		return "invalid_stream"
+	case strings.Contains(value, "accept jellyfin stream"):
+		return "ingestion_failed"
+	case strings.Contains(value, "http "):
+		return "server_error"
+	default:
+		return "network_unreachable"
+	}
 }

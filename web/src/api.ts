@@ -129,13 +129,18 @@ export type Integrations = {
 export type JellyfinRemote = {
   id: string;
   name: string;
+  mode?: "watchweaver_to_jellyfin";
+  state?: "not_configured" | "disabled" | "connecting" | "connected_waiting" | "receiving" | "reconnecting";
   configured: boolean;
   enabled: boolean;
   url?: string;
   user_id?: string;
   connected: boolean;
   last_connected_at?: string;
+  last_attempt_at?: string;
   last_event_at?: string;
+  next_retry_at?: string;
+  last_error_code?: string;
   last_error?: string;
   reconnect_count: number;
   events_received: number;

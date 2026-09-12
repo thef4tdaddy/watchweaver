@@ -492,6 +492,16 @@ describe("WatchWeaver dashboard", () => {
     expect(screen.getByText("WatchWeaver → Seedbox Jellyfin")).toBeInTheDocument();
     expect(screen.getByText("Discord · On").closest(".status-dot")).toHaveClass("provider-discord", "active");
   });
+  it("shows actionable diagnostics for each outbound Jellyfin source", async () => {
+    currentJellyfinRemotes = [{ id:"seedbox", name:"Seedbox Jellyfin", mode:"watchweaver_to_jellyfin", state:"reconnecting", configured:true, enabled:true, url:"https://jellyfin.example", connected:false, last_attempt_at:"2026-09-11T14:00:00Z", next_retry_at:"2026-09-11T14:01:00Z", last_error_code:"authentication_failed", last_error:"Jellyfin rejected the API key. Create a new Jellyfin API key and save this connection again.", reconnect_count:3, events_received:8, protocol_version:1 }];
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText("Mode: WatchWeaver → Jellyfin")).toBeInTheDocument();
+    expect(screen.getByText("Reconnecting")).toBeInTheDocument();
+    expect(screen.getByText(/8 events received · 3 reconnects/)).toBeInTheDocument();
+    expect(screen.getByText(/authentication failed:/)).toBeInTheDocument();
+    expect(screen.getByText(/Create a new Jellyfin API key/)).toBeInTheDocument();
+  });
   it("copies and durably confirms Serializd television reviews", async () => {
     serializdReviews = [{ review_id: 7, media_id: 12, media_type: "episode", title: "Finale", show_title: "Silo", season_number: 3, episode_number: 10, rating: 9, body: "That ending.", review_updated_at: "2026-09-05T10:00:00Z" }];
     const writeText = vi.fn().mockResolvedValue(undefined);

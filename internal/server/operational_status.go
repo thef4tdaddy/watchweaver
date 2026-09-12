@@ -72,8 +72,9 @@ func (a *API) diagnostics(w http.ResponseWriter, r *http.Request) {
 	}
 	diagnostic := map[string]any{
 		"generated_at": time.Now().UTC(), "go_version": runtime.Version(), "status": status,
-		"build": map[string]string{"version": a.version, "revision": a.revision},
+		"build":  map[string]string{"version": a.version, "revision": a.revision},
 		"counts": counts, "privacy": "Credential values, tokens, webhook URLs, media titles, external IDs, database paths, and detailed remote errors are excluded.",
+		"jellyfin_sources": a.jellyfinRemoteDiagnostics(r.Context()),
 	}
 	// Detailed remote messages are useful in the UI but omitted from portable diagnostics.
 	if traktComponent, ok := status.Components["trakt"]; ok && strings.Contains(traktComponent.Detail, "error") {
