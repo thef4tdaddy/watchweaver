@@ -362,19 +362,33 @@ describe("WatchWeaver dashboard", () => {
 		render(<App />);
 		await screen.findByText("The Example");
 		fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /Jellyfin → WatchWeaver/ }));
 		fireEvent.click(await screen.findByRole("button", { name: "Generate token" }));
 		expect(await screen.findByText("one-time-jellyfin-token")).toBeInTheDocument();
 		await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/integrations/jellyfin", expect.objectContaining({ method: "POST" })));
 	});
-  it("shows local receiver and remote connection together", async () => {
+  it("selects a Jellyfin mode and reveals another server form on demand", async () => {
     render(<App />);
     await screen.findByText("The Example");
     fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(await screen.findByLabelText("Jellyfin URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remote Jellyfin connection")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate token" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Jellyfin → WatchWeaver/ }));
     expect(screen.getByRole("button", { name: "Generate token" })).toBeInTheDocument();
     expect(screen.getByLabelText("Plugin receiver connection")).toBeInTheDocument();
-    expect(screen.getByLabelText("Remote Jellyfin connection")).toBeInTheDocument();
-    expect(screen.getByText(/does not disable or change your local plugin receiver/i)).toBeInTheDocument();
+  });
+  it("keeps new Jellyfin setup collapsed after the first outbound connection", async () => {
+    currentJellyfinRemotes = [{ id:"local", name:"Local Jellyfin", configured:true, enabled:true, url:"http://192.168.1.221:8096", connected:true, reconnect_count:0, events_received:3, protocol_version:1 }];
+    render(<App />);
+    await screen.findByText("The Example");
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    expect(await screen.findByText("Local Jellyfin")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Seedbox Jellyfin")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add another Jellyfin server" }));
+    expect(screen.getByPlaceholderText("Seedbox Jellyfin")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByPlaceholderText("Seedbox Jellyfin")).not.toBeInTheDocument();
   });
   it("keeps connected Trakt credentials collapsed until explicitly edited", async () => {
     render(<App />);
