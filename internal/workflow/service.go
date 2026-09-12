@@ -17,6 +17,8 @@ var ErrInvalid = errors.New("invalid workflow action")
 var ErrNotFound = errors.New("item not found")
 
 type Command struct {
+	ClearRating   bool    `json:"clear_rating,omitempty"`
+	ClearReview   bool    `json:"clear_review,omitempty"`
 	Target        string  `json:"target"`
 	ID            int64   `json:"id"`
 	Action        string  `json:"action"`
@@ -40,10 +42,16 @@ func New(db *sql.DB) *Service                                { return &Service{d
 func NewWithClock(db *sql.DB, now func() time.Time) *Service { return &Service{db, now} }
 func (s *Service) Apply(ctx context.Context, c Command, actor, key string) (Result, error) {
 	var out Result
-	if c.Target == "media" && ((c.Rating != nil && c.Action != "rating") || (c.Review != nil && c.Action != "review") || c.Until != nil) {
+	if c.Target == "media" && c.Action != "edit" && ((c.Rating != nil && c.Action != "rating") || (c.Review != nil && c.Action != "review") || c.Until != nil) {
 		return out, ErrInvalid
 	}
 	if c.Target == "task" && c.Action != "snooze" && c.Until != nil {
+		return out, ErrInvalid
+	}
+	if (c.ClearRating || c.ClearReview) && c.Action != "edit" {
+		return out, ErrInvalid
+	}
+	if c.ClearRating && c.Rating != nil || c.ClearReview && c.Review != nil {
 		return out, ErrInvalid
 	}
 	raw, _ := json.Marshal(c)
@@ -53,6 +61,10 @@ func (s *Service) Apply(ctx context.Context, c Command, actor, key string) (Resu
 		return out, err
 	}
 	defer tx.Rollback()
+	// Reserve the SQLite writer for every caller before reading revisions.
+	if _, err = tx.ExecContext(ctx, `UPDATE media_items SET revision=revision WHERE id=?`, c.ID); err != nil {
+		return out, err
+	}
 	if key != "" {
 		// Acquire the writer before reading state; prevents upgrade races with web writes.
 		_, err = tx.ExecContext(ctx, `INSERT INTO bot_requests(actor,request_id,fingerprint,result) VALUES(?,?,?,'') ON CONFLICT DO NOTHING`, actor, key, fingerprint)
@@ -138,6 +150,10 @@ func (s *Service) Apply(ctx context.Context, c Command, actor, key string) (Resu
 			if c.Review == nil {
 				return out, ErrInvalid
 			}
+		case "edit":
+			if c.Rating == nil && c.Review == nil && !c.ClearRating && !c.ClearReview {
+				return out, ErrInvalid
+			}
 		case "delete-rating", "delete-review":
 		case "ignore", "unignore":
 			if kind != "movie" && kind != "show" {
@@ -147,12 +163,12 @@ func (s *Service) Apply(ctx context.Context, c Command, actor, key string) (Resu
 			return out, ErrInvalid
 		}
 	}
-	if c.Rating != nil || c.Review != nil || c.Action == "delete-rating" || c.Action == "delete-review" {
+	if c.Rating != nil || c.Review != nil || c.Action == "delete-rating" || c.ClearRating || (c.Action == "delete-review" || c.ClearReview) {
 		if kind != "movie" && kind != "season" && kind != "episode" {
 			return out, ErrInvalid
 		}
 	}
-	if c.Rating != nil || c.Action == "delete-rating" {
+	if c.Rating != nil || (c.Action == "delete-rating" || c.ClearRating) {
 		if c.Rating != nil {
 			if *c.Rating < 1 || *c.Rating > 10 {
 				return out, ErrInvalid
@@ -183,7 +199,7 @@ func (s *Service) Apply(ctx context.Context, c Command, actor, key string) (Resu
 			return out, err
 		}
 	}
-	if c.Action == "delete-review" {
+	if c.Action == "delete-review" || c.ClearReview {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM reviews WHERE media_id=?`, mediaID); err != nil {
 			return out, err
 		}

@@ -5,7 +5,7 @@ services:
     environment:
       WATCHWEAVER_LISTEN_ADDR: 172.30.81.2:8080
       WATCHWEAVER_BOT_LISTEN_ADDR: 172.30.82.2:8081
-      WATCHWEAVER_BOT_TOKEN_FILE: /run/secrets/ww_bot_token
+      WATCHWEAVER_WEB_PASSWORD_FILE: /run/secrets/ww_web_password
       WATCHWEAVER_BOT_USER_IDS: ${WATCHWEAVER_BOT_USER_IDS:?Set authorized Discord user IDs}
       WATCHWEAVER_PUBLIC_URL: ${WATCHWEAVER_PUBLIC_URL:?Set the browser-accessible WW origin}
       WATCHWEAVER_BOT_NOTIFICATIONS: ${WATCHWEAVER_BOT_NOTIFICATIONS:-false}
@@ -15,7 +15,7 @@ services:
       bot_api:
         ipv4_address: 172.30.82.2
     secrets:
-      - ww_bot_token
+      - ww_web_password
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://172.30.81.2:8080/readyz"]
 networks:
@@ -30,5 +30,6 @@ networks:
       config:
         - subnet: 172.30.82.0/24
 secrets:
-  ww_bot_token:
-    file: ${WATCHWEAVER_BOT_TOKEN_SOURCE:?Set the host path of the service token file}
+
+  ww_web_password:
+    file: ${WATCHWEAVER_WEB_PASSWORD_SOURCE:?Set a separate web password file}

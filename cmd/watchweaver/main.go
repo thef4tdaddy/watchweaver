@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -116,7 +117,21 @@ func main() {
 		log.Fatalf("load remote Jellyfin connections failed: %v", err)
 	}
 	api.SetJellyfinRemotePool(jellyfinRemotes)
-	httpServer := server.New(cfg.ListenAddr, server.NewHandlerWithAPI(readiness, api))
+	botTokenProvider := api.StoredBotToken
+	botTokenOverridden := os.Getenv("WATCHWEAVER_BOT_TOKEN_FILE") != ""
+	if botTokenOverridden {
+		botTokenProvider = server.BotTokenFile(os.Getenv("WATCHWEAVER_BOT_TOKEN_FILE"))
+	}
+	api.ConfigureBotAccess(strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")) != "", botTokenOverridden)
+	var webHandler http.Handler = server.NewHandlerWithAPI(readiness, api)
+	if strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")) != "" {
+		protected, err := server.ProtectWebAccess(webHandler, server.BotTokenFile(os.Getenv("WATCHWEAVER_WEB_PASSWORD_FILE")), botTokenProvider)
+		if err != nil {
+			log.Fatalf("web access configuration: %v", err)
+		}
+		webHandler = protected
+	}
+	httpServer := server.New(cfg.ListenAddr, webHandler)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -124,7 +139,8 @@ func main() {
 	if addr := strings.TrimSpace(os.Getenv("WATCHWEAVER_BOT_LISTEN_ADDR")); addr != "" {
 		handler, err := server.NewBotHandler(api, server.BotConfig{
 			Notifications: os.Getenv("WATCHWEAVER_BOT_NOTIFICATIONS") == "true",
-			TokenProvider: server.BotTokenFile(os.Getenv("WATCHWEAVER_BOT_TOKEN_FILE")),
+			TokenProvider: botTokenProvider,
+			AllowUnpaired: !botTokenOverridden,
 			Users:         strings.Split(os.Getenv("WATCHWEAVER_BOT_USER_IDS"), ","),
 			PublicURL:     os.Getenv("WATCHWEAVER_PUBLIC_URL"),
 		})

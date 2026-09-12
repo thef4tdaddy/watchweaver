@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"github.com/thef4tdaddy/watchweaver/internal/trakt"
 	"net/http"
 	"strconv"
 	"time"
@@ -52,12 +54,27 @@ func (a *API) RunBotWorker(ctx context.Context, notifications bool) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if errors.Is(syncErr, trakt.ErrSyncInProgress) {
+				if _, err = a.db.ExecContext(ctx, `UPDATE bot_sync_jobs SET state='pending' WHERE id=?`, id); err != nil {
+					return err
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-tick.C:
+				}
+				continue
+			}
 			state := "completed"
 			if syncErr != nil {
 				state = "failed"
 			}
 			// Public results contain no remote error strings or credentials.
-			result, _ := json.Marshal(map[string]string{"state": state, "integration": "trakt"})
+			payload := map[string]any{"state": state, "integration": "trakt"}
+			if status, statusErr := a.traktSync.Status(ctx); statusErr == nil && syncErr == nil {
+				payload["summary"] = status.LastResult
+			}
+			result, _ := json.Marshal(payload)
 			if _, err = a.db.ExecContext(ctx, `UPDATE bot_sync_jobs SET state=?,result=? WHERE id=?`, state, string(result), id); err != nil {
 				return err
 			}
@@ -125,13 +142,21 @@ func (a *API) registerBotDelivery(mux *http.ServeMux, notifications bool) {
 			internalError(w)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": r.PathValue("id"), "state": state})
+		payload := map[string]any{"id": r.PathValue("id"), "state": state}
+		if result.Valid {
+			var value any
+			if json.Unmarshal([]byte(result.String), &value) == nil {
+				payload["result"] = value
+			}
+		}
+		writeJSON(w, 200, payload)
 	})
 	if !notifications {
 		return
 	}
 	mux.HandleFunc("POST /api/bot/v1/notifications/claim", a.claimBotNotifications)
 	mux.HandleFunc("POST /api/bot/v1/notifications/{id}/ack", a.ackBotNotification)
+	mux.HandleFunc("POST /api/bot/v1/notifications/{id}/retry", a.retryBotNotification)
 }
 func (a *API) claimBotNotifications(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -143,6 +168,10 @@ func (a *API) claimBotNotifications(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	// Bound catch-up delivery independently of how often the consumer polls.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO app_settings(setting_key,setting_value) VALUES('bot_next_claim','') ON CONFLICT DO NOTHING`); err != nil {
+		internalError(w)
+		return
+	}
 	var next string
 	err = tx.QueryRowContext(ctx, `SELECT setting_value FROM app_settings WHERE setting_key='bot_next_claim'`).Scan(&next)
 	if err != nil && err != sql.ErrNoRows {
@@ -164,7 +193,7 @@ func (a *API) claimBotNotifications(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE bot_notifications SET state='leased',lease=?,lease_until=? WHERE id IN (SELECT id FROM bot_notifications WHERE state='pending' AND revision=(SELECT revision FROM prompt_tasks WHERE id=task_id) ORDER BY id LIMIT 10)`, lease, now.Add(2*time.Minute).Format(time.RFC3339Nano))
+	_, err = tx.ExecContext(ctx, `UPDATE bot_notifications SET state='leased',attempt_count=attempt_count+1,lease=?,lease_until=? WHERE id IN (SELECT id FROM bot_notifications WHERE state='pending' AND julianday(created_at)>julianday('now','-1 day') AND (next_attempt_at IS NULL OR julianday(next_attempt_at)<=julianday('now')) AND revision=(SELECT revision FROM prompt_tasks WHERE id=task_id) ORDER BY id LIMIT 10)`, lease, now.Add(2*time.Minute).Format(time.RFC3339Nano))
 	if err != nil {
 		internalError(w)
 		return
@@ -195,7 +224,7 @@ func (a *API) claimBotNotifications(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "lease_seconds": 120, "digest_recommended": len(items) >= 5})
+	writeJSON(w, 200, map[string]any{"items": items, "lease_seconds": 120, "digest_recommended": len(items) >= 5, "digest_path": "/inbox", "delivery_mode": map[bool]string{true: "digest", false: "cards"}[len(items) >= 5]})
 }
 func (a *API) ackBotNotification(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -220,4 +249,55 @@ func (a *API) ackBotNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (a *API) retryBotNotification(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Lease      string `json:"lease"`
+		Code       string `json:"code"`
+		RetryAfter int    `json:"retry_after_seconds"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	switch body.Code {
+	case "rate_limited", "unavailable", "permission_denied", "message_missing":
+	default:
+		badRequest(w, "unsupported delivery error code")
+		return
+	}
+	if body.Lease == "" || body.RetryAfter < 0 || body.RetryAfter > 86400 {
+		badRequest(w, "invalid retry request")
+		return
+	}
+	var attempts int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT attempt_count FROM bot_notifications WHERE id=? AND lease=? AND state='leased'`, r.PathValue("id"), body.Lease).Scan(&attempts); err == sql.ErrNoRows {
+		conflict(w, "delivery lease changed")
+		return
+	} else if err != nil {
+		internalError(w)
+		return
+	}
+	if attempts > 8 {
+		attempts = 8
+	}
+	delay := 30 * (1 << attempts)
+	if delay < body.RetryAfter {
+		delay = body.RetryAfter
+	}
+	if body.Code == "permission_denied" && delay < 3600 {
+		delay = 3600
+	}
+	next := time.Now().UTC().Add(time.Duration(delay) * time.Second).Format(time.RFC3339Nano)
+	result, err := a.db.ExecContext(r.Context(), `UPDATE bot_notifications SET state='pending',lease=NULL,next_attempt_at=?,last_error_code=? WHERE id=? AND lease=? AND state='leased' AND lease_until>?`, next, body.Code, r.PathValue("id"), body.Lease, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		internalError(w)
+		return
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		conflict(w, "delivery lease expired or changed")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"next_attempt_at": next})
 }

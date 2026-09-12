@@ -14,7 +14,6 @@ import {
   type OperationalStatus,
   type Page,
   type Rating,
-  type Review,
   type SerializdStatus,
   type SerializdReview,
   type Settings,
@@ -461,7 +460,7 @@ function StarRating({ value, onChange, label, emptyLabel = "Choose rating" }: { 
   </div>;
 }
 
-function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, onCountChange, query = "" }: { query?: string; onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean; onCountChange: (count: number) => void }) {
+function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, onCountChange, query = "", onActionComplete }: { onActionComplete?:()=>void; query?: string; onError: (value: string) => void; syncRunning: boolean; syncPhase?: string; syncError?: string; integrationLoaded: boolean; onCountChange: (count: number) => void }) {
   const [page, setPage] = useState<Page<Task>>();
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const [drafts, setDrafts] = useState<
@@ -521,9 +520,11 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
     try {
       await request(`/api/tasks/${id}/${action}`, {
         method: "POST",
+        headers:page?.items.find(t=>t.id===id)?.revision ? {"If-Match":String(page.items.find(t=>t.id===id)?.revision)}:undefined,
         body: body ? JSON.stringify(body) : undefined,
       });
       await load();
+      onActionComplete?.();
     } catch (e) {
       onError((e as Error).message);
     } finally {
@@ -611,6 +612,7 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
                       }
                       onClick={() =>
                         void act(task.id, "complete", {
+                          revision:task.revision,media_revision:task.media_revision,
                           ...(task.type !== "review" && draft.rating ? { rating: draft.rating } : {}),
                           ...(task.media.type !== "episode" && task.type !== "rating" && draft.review.trim()
                             ? { review: draft.review }
@@ -722,33 +724,28 @@ function HistoryEditor({ item, onError }: { item: HistoryItem; onError: (v: stri
   const [target, setTarget] = useState(targets[0]);
   const [rating, setRating] = useState<number>();
   const [review, setReview] = useState("");
-  const [original, setOriginal] = useState<{ rating?: number; review: string }>({ review: "" });
+  const [original, setOriginal] = useState<{ rating?: number; review: string; revision?:number }>({ review: "" });
   const [busy, setBusy] = useState(true);
   const [saved, setSaved] = useState("");
   // oxlint-disable react/set-state-in-effect -- changing targets starts an external API synchronization.
   useEffect(() => {
     setBusy(true);
     setSaved("");
-    Promise.all([
-      request<Rating>(`/api/media/${target.id}/rating`).catch((e) => e instanceof APIError && e.status === 404 ? undefined : Promise.reject(e)),
-      request<Review>(`/api/media/${target.id}/review`).catch((e) => e instanceof APIError && e.status === 404 ? undefined : Promise.reject(e)),
-    ]).then(([currentRating, currentReview]) => {
-      const value = { rating: currentRating?.rating, review: currentReview?.body || "" };
-      setRating(value.rating);
-      setReview(value.review);
-      setOriginal(value);
-    }).catch((e) => onError(e.message)).finally(() => setBusy(false));
+    request<{rating?:number;review?:string;revision:number}>(`/api/media/${target.id}`).then(current => {
+      const value = {rating:current.rating,review:current.review||"",revision:current.revision};
+      setRating(value.rating);setReview(value.review);setOriginal(value);
+    }).catch((e)=>onError(e.message)).finally(()=>setBusy(false));
   }, [target.id, onError]);
   // oxlint-enable react/set-state-in-effect
   const save = async () => {
     setBusy(true);
     setSaved("");
     try {
-      if (rating !== original.rating) await request(`/api/media/${target.id}/rating`, rating === undefined ? { method: "DELETE" } : { method: "PUT", body: JSON.stringify({ rating }) });
-      const trimmed = review.trim();
-      if (trimmed !== original.review) await request(`/api/media/${target.id}/review`, trimmed ? { method: "PUT", body: JSON.stringify({ body: trimmed }) } : { method: "DELETE" });
-      const value = { rating, review: trimmed };
-      setReview(trimmed);
+      const trimmed=review.trim();
+      await request(`/api/media/${target.id}/edit`,{method:"POST",body:JSON.stringify({rating:rating??null,review:trimmed,revision:original.revision})});
+      const current=await request<{rating?:number;review?:string;revision:number}>(`/api/media/${target.id}`);
+      const value = { rating:current.rating, review:current.review||"",revision:current.revision };
+      setRating(value.rating);setReview(value.review);
       setOriginal(value);
       setSaved("Saved");
     } catch (e) {
@@ -1624,6 +1621,7 @@ function SettingsView({
           Save preferences
         </button>
       </div>
+      <BotConnectionSettings onError={onError}/>
       <div className="settings-card full">
         <div className="card-heading">
           <div>
@@ -1813,11 +1811,11 @@ export default App;
 
 const ignoreCount = () => undefined;
 function ResourcePage({path,onError}:{path:string;onError:(value:string)=>void}) {
-  const [resource,setResource] = useState<{media:Task["media"]; task?:Task; ignored?:boolean}>();
+  const [resource,setResource] = useState<{media:Task["media"]; task?:Task; ignored?:boolean;children?:Task["media"][]}>();
   const [failed,setFailed] = useState(false);
   useEffect(() => {
     let active = true;
-    request<{media:Task["media"];task?:Task;ignored?:boolean}>(`/api${path}`).then(value=>{if(active){setResource(value);setFailed(false);}}).catch(()=>{if(active)setFailed(true);});
+    request<{media:Task["media"];task?:Task;ignored?:boolean;children?:Task["media"][]}>(`/api${path}`).then(value=>{if(active){setResource(value);setFailed(false);}}).catch(()=>{if(active)setFailed(true);});
     return ()=>{active=false;};
   },[path]);
   if(failed) return <section><Empty title="Item unavailable" body="This item may have been removed or the connection is unavailable."/><a href="/inbox">Open inbox</a></section>;
@@ -1827,8 +1825,27 @@ function ResourcePage({path,onError}:{path:string;onError:(value:string)=>void})
     try {await request(`/api/media/${media.id}/ignore`,{method:resource.ignored?"DELETE":"PUT"});setResource({...resource,ignored:!resource.ignored});}catch(e){onError((e as Error).message);}
   };
   return <section key={path}><h2>{mediaLabel(media)}</h2><p>{media.title}</p>{task && <p>Task status: <strong>{task.state}</strong></p>}
-    {task && (task.state === "pending" || task.state === "snoozed") ? <Inbox query={`?task_id=${task.id}`} onError={onError} syncRunning={false} integrationLoaded={true} onCountChange={ignoreCount}/> : media.type !== "show" ? <HistoryEditor key={media.id} item={{media} as HistoryItem} onError={onError}/> : <p>Open a season or episode to rate or review it.</p>}
+    {task && (task.state === "pending" || task.state === "snoozed") ? <Inbox query={`?task_id=${task.id}`} onError={onError} syncRunning={false} integrationLoaded={true} onCountChange={ignoreCount} onActionComplete={()=>{void request<typeof resource>(`/api${path}`).then(setResource).catch((e)=>onError(e.message));}}/> : media.type !== "show" ? <HistoryEditor key={media.id} item={{media} as HistoryItem} onError={onError}/> : <p>Open a season or episode to rate or review it.</p>}
+    {resource.children?.length ? <ul>{resource.children.map(child=><li key={child.id}><a href={`/media/${child.id}`}>{mediaLabel(child)}</a></li>)}</ul> : null}
     {(media.type==="movie"||media.type==="show")&&<button className="secondary" onClick={()=>void toggleIgnore()}>{resource.ignored?"Allow future prompts":"Ignore future prompts"}</button>}
     <a href="/inbox">Open inbox</a>
   </section>;
+}
+
+function BotConnectionSettings({onError}:{onError:(value:string)=>void}) {
+ const [status,setStatus]=useState<{enabled:boolean;configured:boolean;overridden:boolean;last_handshake?:string}>();
+ const [token,setToken]=useState("");const [busy,setBusy]=useState(false);
+ const load=useCallback(()=>request<NonNullable<typeof status>>("/api/integrations/discord-bot").then(setStatus),[]);
+ useEffect(()=>{void load().catch(()=>undefined);},[load]);
+ const change=async(method:string)=>{
+  if(status?.configured&&!window.confirm(method==="DELETE"?"Revoke the bot token? The bot will lose access immediately.":"Replace the bot token? Update the bot with the new token to reconnect."))return;
+  setBusy(true);setToken("");try{const result=await request<{token?:string}>("/api/integrations/discord-bot",{method});setToken(result?.token||"");await load();}catch(e){onError((e as Error).message);}finally{setBusy(false);}
+ };
+ if(!status)return null;
+ return <div className="settings-card full"><h2>Discord bot connection</h2>
+ <p>{status.enabled?"Create a token, then enter it and your WatchWeaver API address in the bot. The bot checks compatibility with a handshake.":"Enable the protected bot connection in your container configuration to pair a bot."}</p>
+ {status.last_handshake&&<p>Last successful handshake: {formatDate(status.last_handshake)}</p>}
+ {status.overridden?<p>The token is managed by your container configuration.</p>:status.enabled&&<div className="actions"><button className="primary" disabled={busy} onClick={()=>void change("POST")}>{status.configured?"Replace API token":"Create API token"}</button>{status.configured&&<button className="secondary" disabled={busy} onClick={()=>void change("DELETE")}>Revoke token</button>}</div>}
+ {token&&<div><p>Copy this token now. It will not be shown again.</p><input aria-label="New bot API token" value={token} readOnly/><button className="secondary" onClick={()=>void copyToClipboard(token).catch(e=>onError(e.message))}>Copy token</button><button className="text-button" onClick={()=>setToken("")}>Dismiss token</button></div>}
+ </div>;
 }

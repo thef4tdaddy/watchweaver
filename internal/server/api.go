@@ -26,23 +26,25 @@ import (
 const maxRequestBody = 1 << 20
 
 type API struct {
-	db                *sql.DB
-	ratings           *ratings.Service
-	letterboxd        *letterboxd.Service
-	serializd         *serializd.Service
-	trakt             *trakt.Service
-	credentials       *credentials.Store
-	discord           *discord.Notifier
-	traktSync         *trakt.SyncManager
-	jellyfinRemotes   *jellyfinremote.Pool
-	discordConfigured bool
-	version           string
-	revision          string
-	updateURL         string
-	updateTagsURL     string
-	compareBaseURL    string
-	updateClient      *http.Client
-	updateCache       updateCache
+	botEnabled         bool
+	botTokenOverridden bool
+	db                 *sql.DB
+	ratings            *ratings.Service
+	letterboxd         *letterboxd.Service
+	serializd          *serializd.Service
+	trakt              *trakt.Service
+	credentials        *credentials.Store
+	discord            *discord.Notifier
+	traktSync          *trakt.SyncManager
+	jellyfinRemotes    *jellyfinremote.Pool
+	discordConfigured  bool
+	version            string
+	revision           string
+	updateURL          string
+	updateTagsURL      string
+	compareBaseURL     string
+	updateClient       *http.Client
+	updateCache        updateCache
 }
 
 func (a *API) SetDiscordConfigured(configured bool)            { a.discordConfigured = configured }
@@ -68,12 +70,14 @@ type mediaJSON struct {
 }
 
 type taskJSON struct {
-	ID           int64     `json:"id"`
-	Type         string    `json:"type"`
-	State        string    `json:"state"`
-	SnoozedUntil *string   `json:"snoozed_until,omitempty"`
-	CreatedAt    string    `json:"created_at"`
-	Media        mediaJSON `json:"media"`
+	Revision      int64     `json:"revision"`
+	MediaRevision int64     `json:"media_revision"`
+	ID            int64     `json:"id"`
+	Type          string    `json:"type"`
+	State         string    `json:"state"`
+	SnoozedUntil  *string   `json:"snoozed_until,omitempty"`
+	CreatedAt     string    `json:"created_at"`
+	Media         mediaJSON `json:"media"`
 }
 
 type historyJSON struct {
@@ -102,6 +106,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tasks/", a.taskAction)
 	mux.HandleFunc("/api/media/", a.mediaResource)
 	mux.HandleFunc("/api/settings", a.settings)
+	mux.HandleFunc("/api/integrations/discord-bot", a.botPairing)
 	mux.HandleFunc("/api/integrations", a.integrationStatus)
 	mux.HandleFunc("/api/status", a.operationalStatus)
 	mux.HandleFunc("/api/update", a.update)
@@ -364,7 +369,7 @@ func (a *API) inbox(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT t.id,t.task_type,t.state,t.snoozed_until,t.created_at,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,
+	rows, err := a.db.QueryContext(r.Context(), `SELECT t.id,t.task_type,t.state,t.snoozed_until,t.created_at,t.revision,m.revision,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,
 		CASE WHEN m.media_type='season' THEN p.title WHEN m.media_type='episode' THEN gp.title ELSE '' END
 		FROM prompt_tasks t JOIN media_items m ON m.id=t.media_id
 		LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id
@@ -379,7 +384,7 @@ func (a *API) inbox(w http.ResponseWriter, r *http.Request) {
 		var item taskJSON
 		var snooze, year sql.NullString
 		var season, episode sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.Type, &item.State, &snooze, &item.CreatedAt, &item.Media.ID, &item.Media.Type, &item.Media.Title, &year, &season, &episode, &item.Media.ShowTitle); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &item.State, &snooze, &item.CreatedAt, &item.Revision, &item.MediaRevision, &item.Media.ID, &item.Media.Type, &item.Media.Title, &year, &season, &episode, &item.Media.ShowTitle); err != nil {
 			internalError(w)
 			return
 		}
@@ -511,8 +516,10 @@ func (a *API) taskAction(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) completeTask(w http.ResponseWriter, r *http.Request, id int64) {
 	var body struct {
-		Rating *int    `json:"rating"`
-		Review *string `json:"review"`
+		Revision      *int64  `json:"revision"`
+		MediaRevision *int64  `json:"media_revision"`
+		Rating        *int    `json:"rating"`
+		Review        *string `json:"review"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -530,7 +537,7 @@ func (a *API) completeTask(w http.ResponseWriter, r *http.Request, id int64) {
 		return
 	}
 
-	a.applyWorkflow(w, r, workflow.Command{Target: "task", ID: id, Action: "complete", Rating: body.Rating, Review: body.Review})
+	a.applyWorkflow(w, r, workflow.Command{Target: "task", ID: id, Action: "complete", Rating: body.Rating, Review: body.Review, Revision: body.Revision, MediaRevision: body.MediaRevision})
 }
 
 func (a *API) transitionTask(w http.ResponseWriter, r *http.Request, id int64, state string, snooze *string) {
@@ -580,6 +587,8 @@ func (a *API) mediaResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch parts[1] {
+	case "edit":
+		a.editMedia(w, r, id)
 	case "rating":
 		a.rating(w, r, id)
 	case "review":

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"github.com/thef4tdaddy/watchweaver/internal/workflow"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 func (a *API) loadMedia(ctx context.Context, id int64) (mediaJSON, error) {
@@ -82,6 +84,37 @@ func (a *API) resourceDetail(w http.ResponseWriter, r *http.Request, id int64, t
 		return
 	}
 	response["ignored"] = ignored
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id FROM media_items WHERE parent_id=? ORDER BY season_number,episode_number,id`, mediaID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	ids := []int64{}
+	for rows.Next() {
+		var childID int64
+		if err = rows.Scan(&childID); err != nil {
+			rows.Close()
+			internalError(w)
+			return
+		}
+		ids = append(ids, childID)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		internalError(w)
+		return
+	}
+	children := []mediaJSON{}
+	for _, childID := range ids {
+		child, err := a.loadMedia(r.Context(), childID)
+		if err != nil {
+			internalError(w)
+			return
+		}
+		children = append(children, child)
+	}
+	response["children"] = children
 
 	if task {
 		t.Media = m
@@ -91,6 +124,14 @@ func (a *API) resourceDetail(w http.ResponseWriter, r *http.Request, id int64, t
 }
 
 func (a *API) applyWorkflow(w http.ResponseWriter, r *http.Request, c workflow.Command) {
+	if raw := r.Header.Get("If-Match"); raw != "" {
+		v, err := strconv.ParseInt(strings.Trim(raw, `"`), 10, 64)
+		if err != nil || v < 1 {
+			badRequest(w, "invalid resource revision")
+			return
+		}
+		c.Revision = &v
+	}
 	out, err := workflow.New(a.db).Apply(r.Context(), c, "", "")
 	workflowResponse(w, out, err)
 }
@@ -157,4 +198,30 @@ func (a *API) searchMedia(w http.ResponseWriter, r *http.Request) {
 		items = append(items, m)
 	}
 	writeJSON(w, 200, newPage(page, perPage, total, items))
+}
+
+func (a *API) editMedia(w http.ResponseWriter, r *http.Request, id int64) {
+	if r.Method != "POST" {
+		methodNotAllowed(w)
+		return
+	}
+	var body struct {
+		Rating   *int   `json:"rating"`
+		Review   string `json:"review"`
+		Revision *int64 `json:"revision"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Revision == nil {
+		badRequest(w, "revision is required")
+		return
+	}
+	c := workflow.Command{Target: "media", ID: id, Action: "edit", Rating: body.Rating, Revision: body.Revision, ClearRating: body.Rating == nil}
+	if strings.TrimSpace(body.Review) == "" {
+		c.ClearReview = true
+	} else {
+		c.Review = &body.Review
+	}
+	a.applyWorkflow(w, r, c)
 }

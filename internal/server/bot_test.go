@@ -102,6 +102,15 @@ func TestBotOutboxLeaseAndAck(t *testing.T) {
 	if ack.Code != http.StatusNoContent {
 		t.Fatal(ack.Code, ack.Body.String())
 	}
+	// A new API instance models a consumer/server restart; the receipt is durable.
+	restarted := NewAPI(f.db, nil)
+	duplicate := httptest.NewRequest("POST", "/", strings.NewReader(fmt.Sprintf(`{"lease":%q,"message_id":"456"}`, item["lease"])))
+	duplicate.SetPathValue("id", fmt.Sprint(item["id"]))
+	duplicateAck := httptest.NewRecorder()
+	restarted.ackBotNotification(duplicateAck, duplicate)
+	if duplicateAck.Code != http.StatusNoContent {
+		t.Fatal(duplicateAck.Code, duplicateAck.Body.String())
+	}
 	if err := f.api.produceBotNotifications(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -136,5 +145,74 @@ func TestBotWorkerEstablishesBaselineAndStops(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("baseline history was notified")
+	}
+}
+
+func TestBotLeaseCrashRecoveryAndRateLimit(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	ctx := context.Background()
+	if _, err := f.db.Exec(`INSERT INTO app_settings(setting_key,setting_value) VALUES('bot_task_baseline','0')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.api.produceBotNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	claim := func() map[string]any {
+		w := httptest.NewRecorder()
+		f.api.claimBotNotifications(w, httptest.NewRequest("POST", "/", nil))
+		if w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		return decodeMap(t, w)
+	}
+	first := claim()["items"].([]any)[0].(map[string]any)
+	if len(claim()["items"].([]any)) != 0 {
+		t.Fatal("claim throttle bypassed")
+	}
+	// Simulate a crash after sending without acknowledgment and a later restart.
+	if _, err := f.db.Exec(`UPDATE bot_notifications SET lease_until='2000-01-01T00:00:00Z'; DELETE FROM app_settings WHERE setting_key='bot_next_claim'`); err != nil {
+		t.Fatal(err)
+	}
+	second := claim()["items"].([]any)[0].(map[string]any)
+	if first["id"] != second["id"] || first["lease"] == second["lease"] {
+		t.Fatal("job identity/lease recovery failed")
+	}
+	stale := httptest.NewRequest("POST", "/", strings.NewReader(fmt.Sprintf(`{"lease":%q,"message_id":"77"}`, first["lease"])))
+	stale.SetPathValue("id", fmt.Sprint(first["id"]))
+	w := httptest.NewRecorder()
+	f.api.ackBotNotification(w, stale)
+	if w.Code != 409 {
+		t.Fatal(w.Code)
+	}
+	retry := httptest.NewRequest("POST", "/", strings.NewReader(fmt.Sprintf(`{"lease":%q,"code":"rate_limited","retry_after_seconds":600}`, second["lease"])))
+	retry.SetPathValue("id", fmt.Sprint(second["id"]))
+	w = httptest.NewRecorder()
+	f.api.retryBotNotification(w, retry)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if _, err := f.db.Exec(`DELETE FROM app_settings WHERE setting_key='bot_next_claim'`); err != nil {
+		t.Fatal(err)
+	}
+	if len(claim()["items"].([]any)) != 0 {
+		t.Fatal("rate-limit delay ignored")
+	}
+}
+func TestBotStaleAndOldNotificationsExpire(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	ctx := context.Background()
+	f.db.Exec(`INSERT INTO app_settings(setting_key,setting_value) VALUES('bot_task_baseline','0')`)
+	if err := f.api.produceBotNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.request("POST", fmt.Sprintf("/api/tasks/%d/skip", f.taskID), ""); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	if err := f.api.produceBotNotifications(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.db.QueryRow(`SELECT state FROM bot_notifications LIMIT 1`).Scan(&state); err != nil || state != "expired" {
+		t.Fatal(state, err)
 	}
 }

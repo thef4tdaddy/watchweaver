@@ -110,3 +110,31 @@ func TestMediaWritesRejectStaleStateAndSynchronizeDeletion(t *testing.T) {
 		t.Fatal("deletion not queued for Trakt")
 	}
 }
+
+func TestWebAndBotConcurrentEditsConflict(t *testing.T) {
+	s, db, id := fixture(t)
+	revision := int64(1)
+	rating := 8
+	review := "From web"
+	results := make(chan error, 2)
+	start := make(chan struct{})
+	go func() {
+		<-start
+		_, err := s.Apply(context.Background(), Command{Target: "media", ID: id, Action: "edit", Rating: &rating, Review: &review, Revision: &revision}, "", "")
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, err := s.Apply(context.Background(), Command{Target: "media", ID: id, Action: "rating", Rating: &rating, Revision: &revision}, "discord", "interaction")
+		results <- err
+	}()
+	close(start)
+	a, b := <-results, <-results
+	if !((a == nil && errors.Is(b, ErrConflict)) || (b == nil && errors.Is(a, ErrConflict))) {
+		t.Fatalf("expected one commit and one conflict: %v, %v", a, b)
+	}
+	var current int64
+	if err := db.QueryRow(`SELECT revision FROM media_items WHERE id=?`, id).Scan(&current); err != nil || current < 2 {
+		t.Fatal(current, err)
+	}
+}

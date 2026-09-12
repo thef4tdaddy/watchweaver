@@ -14,6 +14,7 @@ import (
 // BotConfig is intentionally independent from the web/admin configuration API.
 // TokenProvider is read per request so file-secret replacement revokes old access.
 type BotConfig struct {
+	AllowUnpaired bool
 	Notifications bool
 	TokenProvider func() (string, error)
 	Users         []string
@@ -41,8 +42,12 @@ func NewBotHandler(api *API, cfg BotConfig) (http.Handler, error) {
 	if cfg.TokenProvider == nil || len(cfg.Users) == 0 {
 		return nil, errors.New("bot token and authorized users are required")
 	}
-	if _, err = cfg.TokenProvider(); err != nil {
+	initial, err := cfg.TokenProvider()
+	if err != nil {
 		return nil, err
+	}
+	if len(initial) < 32 && !(cfg.AllowUnpaired && initial == "") {
+		return nil, errors.New("bot credential unavailable or too short")
 	}
 	users := map[string]bool{}
 	for _, id := range cfg.Users {
@@ -55,6 +60,7 @@ func NewBotHandler(api *API, cfg BotConfig) (http.Handler, error) {
 	base := strings.TrimRight(cfg.PublicURL, "/")
 	mux := http.NewServeMux()
 	api.registerBotDelivery(mux, cfg.Notifications)
+	mux.HandleFunc("POST /api/bot/v1/handshake", func(w http.ResponseWriter, r *http.Request) { api.botHandshake(w, r, base, cfg.Notifications) })
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { notFound(w) })
 	mux.HandleFunc("GET /api/bot/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		caps := []string{"inbox.read", "history.read", "media.read", "status.read", "workflow.write"}
@@ -64,7 +70,7 @@ func NewBotHandler(api *API, cfg BotConfig) (http.Handler, error) {
 		if cfg.Notifications {
 			caps = append(caps, "notifications.claim")
 		}
-		writeJSON(w, 200, map[string]any{"api_version": "1", "capabilities": caps, "links": map[string]string{"inbox": base + "/inbox", "history": base + "/history", "letterboxd": base + "/letterboxd", "serializd": base + "/serializd", "settings": base + "/settings"}})
+		writeJSON(w, 200, map[string]any{"api_version": "1", "app_version": api.version, "required_client_protocol": "1", "capabilities": caps, "links": map[string]string{"inbox": base + "/inbox", "history": base + "/history", "letterboxd": base + "/letterboxd", "serializd": base + "/serializd", "settings": base + "/settings"}})
 	})
 	// Register exact read routes only. Never mount the web API or its catch-all here.
 	reads := map[string]http.HandlerFunc{"media": api.searchMedia, "inbox": api.inbox, "history": api.history, "status": api.operationalStatus, "integrations": api.integrationStatus, "letterboxd": api.letterboxdStatus, "serializd": api.serializdStatus}
@@ -94,7 +100,7 @@ func NewBotHandler(api *API, cfg BotConfig) (http.Handler, error) {
 		out, err := workflow.New(api.db).Apply(r.Context(), c, r.Header.Get("X-Discord-User-ID"), key)
 		workflowResponse(w, out, err)
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return auditBotRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		token, err := cfg.TokenProvider()
 		if err != nil || len(token) < 32 {
@@ -112,5 +118,5 @@ func NewBotHandler(api *API, cfg BotConfig) (http.Handler, error) {
 			return
 		}
 		mux.ServeHTTP(w, r)
-	}), nil
+	})), nil
 }
