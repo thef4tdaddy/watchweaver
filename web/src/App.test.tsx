@@ -224,6 +224,15 @@ describe("WatchWeaver dashboard", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("1 inbox item waiting")).toBeInTheDocument();
   });
+  it("provides keyboard landmarks and exposes the selected navigation item", async () => {
+    render(<App />);
+    expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute("href", "#main-content");
+    expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
+    expect(screen.getByRole("button", { name: "Inbox" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByRole("button", { name: "History" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Inbox" })).not.toHaveAttribute("aria-current");
+  });
   it("hides the inbox attention dot when no prompts are actionable", async () => {
     activeTask = undefined;
     render(<App />);
@@ -392,7 +401,11 @@ describe("WatchWeaver dashboard", () => {
     expect(await screen.findByLabelText("Jellyfin URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Remote Jellyfin connection")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Generate token" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Jellyfin → WatchWeaver/ }));
+    expect(screen.getByRole("button", { name: /WatchWeaver → Jellyfin/ })).toHaveAttribute("aria-pressed", "true");
+    const receiverMode = screen.getByRole("button", { name: /Jellyfin → WatchWeaver/ });
+    expect(receiverMode).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(receiverMode);
+    expect(receiverMode).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Generate token" })).toBeInTheDocument();
     expect(screen.getByLabelText("Plugin receiver connection")).toBeInTheDocument();
   });

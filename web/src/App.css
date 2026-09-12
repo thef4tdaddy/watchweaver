@@ -80,3 +80,11 @@ textarea,input{background:#020617;color:var(--ink)}
 .connection-info.compact{margin:12px 0;gap:5px}
 .jellyfin-method .override-note{max-width:700px;margin-top:14px}
 @media(max-width:900px){.jellyfin-sources-grid{grid-template-columns:1fr}}@media(max-width:650px){.connection-tabs,.mode-selector,.jellyfin-fields{grid-template-columns:1fr}.star-picker{width:160px}.star-track,.star-picker>.star-fill{font-size:29px;letter-spacing:2px}}
+
+/* Keyboard navigation and narrow-screen safeguards. */
+.skip-link{position:fixed;z-index:1000;top:8px;left:8px;transform:translateY(-160%);padding:10px 14px;border-radius:8px;background:var(--cyan);color:#020617;font-weight:800}
+.skip-link:focus{transform:translateY(0)}
+:where(button,a,input,textarea):focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+.content,.settings-card,.remote-source,.remote-source-heading>div{min-width:0}
+.remote-source-heading small,.connection-info,.auth-code{overflow-wrap:anywhere}
+@media(max-width:520px){.settings-card{padding:17px}.card-heading,.source-heading,.remote-source-heading{align-items:flex-start;flex-direction:column}.settings-actions>*{flex:1 1 150px}.alert{gap:10px}.alert button{min-width:32px;min-height:32px}.auth-code{padding:14px}.auth-code strong{font-size:20px}}
