@@ -138,3 +138,65 @@ func TestWebAndBotConcurrentEditsConflict(t *testing.T) {
 		t.Fatal(current, err)
 	}
 }
+
+func TestReviewCRUDAndHalfStarRatingRange(t *testing.T) {
+	s, db, id := fixture(t)
+	ctx := context.Background()
+	for rating := 1; rating <= 10; rating++ {
+		if _, err := s.Apply(ctx, Command{Target: "media", ID: id, Action: "rating", Rating: &rating}, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		var saved int
+		if err := db.QueryRow(`SELECT rating FROM ratings WHERE media_id=?`, id).Scan(&saved); err != nil || saved != rating {
+			t.Fatal(saved, err)
+		}
+	}
+	text := "  A useful review  "
+	if _, err := s.Apply(ctx, Command{Target: "media", ID: id, Action: "review", Review: &text}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var saved string
+	if err := db.QueryRow(`SELECT body FROM reviews WHERE media_id=?`, id).Scan(&saved); err != nil || saved != "A useful review" {
+		t.Fatal(saved, err)
+	}
+	if _, err := s.Apply(ctx, Command{Target: "media", ID: id, Action: "delete-review"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM reviews WHERE media_id=?`, id).Scan(&count); err != nil || count != 0 {
+		t.Fatal(count, err)
+	}
+}
+
+func TestInvalidWorkflowPayloadsLeaveNoChanges(t *testing.T) {
+	s, db, id := fixture(t)
+	rating := 11
+	text := "review"
+	until := "invalid"
+	for _, command := range []Command{
+		{Target: "media", ID: id, Action: "rating", Rating: &rating},
+		{Target: "media", ID: id, Action: "rating"},
+		{Target: "media", ID: id, Action: "review"},
+		{Target: "media", ID: id, Action: "ignore", Rating: &rating},
+		{Target: "media", ID: id, Action: "rating", ClearRating: true},
+		{Target: "media", ID: id, Action: "edit", Rating: &rating, ClearRating: true},
+		{Target: "media", ID: id, Action: "edit", Review: &text, ClearReview: true},
+		{Target: "media", ID: id, Action: "edit"},
+		{Target: "media", ID: id, Action: "rating", Until: &until},
+		{Target: "media", ID: id, Action: "admin"},
+		{Target: "settings", ID: id, Action: "edit"},
+	} {
+		if _, err := s.Apply(context.Background(), command, "actor", "invalid"); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%+v: %v", command, err)
+		}
+	}
+	for _, table := range []string{"ratings", "reviews", "bot_requests", "prompt_ignored_media"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatal(table, count, err)
+		}
+	}
+	if _, err := s.Apply(context.Background(), Command{Target: "media", ID: 999999, Action: "ignore"}, "", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}
