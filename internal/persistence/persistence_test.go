@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,6 +56,125 @@ func TestOpenAndMigrateIsIdempotent(t *testing.T) {
 	}
 	if migrationCount != expected {
 		t.Fatalf("expected %d migration records after restart, got %d", expected, migrationCount)
+	}
+}
+
+func TestOpenAndMigrateCreatesVerifiedPairedBackupBeforeUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "watchweaver.db")
+	keyPath := filepath.Join(dir, ".watchweaver.key")
+	v1 := fstest.MapFS{"migrations/000001_initial.up.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE preserved (value TEXT); INSERT INTO preserved(value) VALUES ('before');`)}}
+	first, err := OpenAndMigrate(Options{Path: dbPath, MigrationsFS: v1, MigrationsDir: "migrations"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("paired-secret-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v2 := fstest.MapFS{
+		"migrations/000001_initial.up.sql": v1["migrations/000001_initial.up.sql"],
+		"migrations/000002_upgrade.up.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE upgraded (id INTEGER);`)},
+	}
+	upgraded, err := OpenAndMigrate(Options{Path: dbPath, MigrationsFS: v2, MigrationsDir: "migrations", CredentialKeyPath: keyPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	backups, err := filepath.Glob(filepath.Join(dir, "backups", "watchweaver-pre-migration-*.db"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("expected one migration backup, got %v err=%v", backups, err)
+	}
+	if err := VerifyBackup(backups[0]); err != nil {
+		t.Fatal(err)
+	}
+	key, err := os.ReadFile(backups[0] + ".key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(key) != "paired-secret-key" {
+		t.Fatalf("unexpected paired key %q", key)
+	}
+	restored, err := sql.Open("sqlite", "file:"+filepath.ToSlash(backups[0])+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	var value string
+	if err := restored.QueryRow(`SELECT value FROM preserved`).Scan(&value); err != nil || value != "before" {
+		t.Fatalf("backup did not preserve pre-upgrade data: value=%q err=%v", value, err)
+	}
+	assertTableMissing(t, restored, "upgraded")
+}
+
+func TestOpenAndMigrateDoesNotBackupCurrentSchema(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "watchweaver.db")
+	first, err := OpenAndMigrate(Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+	second, err := OpenAndMigrate(Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = second.Close()
+	backups, err := filepath.Glob(filepath.Join(dir, "backups", "watchweaver-pre-migration-*.db"))
+	if err != nil || len(backups) != 0 {
+		t.Fatalf("expected no redundant backup, got %v err=%v", backups, err)
+	}
+}
+
+func TestOpenAndMigrateBackupFailureLeavesMigrationUnapplied(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "watchweaver.db")
+	v1 := fstest.MapFS{"migrations/000001_initial.up.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE preserved (id INTEGER);`)}}
+	first, err := OpenAndMigrate(Options{Path: dbPath, MigrationsFS: v1, MigrationsDir: "migrations"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+	blocked := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v2 := fstest.MapFS{
+		"migrations/000001_initial.up.sql": v1["migrations/000001_initial.up.sql"],
+		"migrations/000002_upgrade.up.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE must_not_exist (id INTEGER);`)},
+	}
+	if db, err := OpenAndMigrate(Options{Path: dbPath, MigrationsFS: v2, MigrationsDir: "migrations", MigrationBackupDir: blocked}); err == nil {
+		_ = db.Close()
+		t.Fatal("expected backup failure")
+	}
+	check, err := openSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	assertTableMissing(t, check, "must_not_exist")
+}
+
+func TestMigrationBackupRetentionKeepsNewestPairs(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"watchweaver-pre-migration-v000001-1.db", "watchweaver-pre-migration-v000002-2.db", "watchweaver-pre-migration-v000003-3.db"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("db"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name+".key"), []byte("key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := retainMigrationBackups(dir, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "watchweaver-pre-migration-v000001-1.db")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oldest database was not removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "watchweaver-pre-migration-v000001-1.db.key")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oldest key was not removed: %v", err)
 	}
 }
 
