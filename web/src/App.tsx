@@ -33,6 +33,8 @@ const nav: [View, string, string][] = [
   ["settings", "Settings", "settings"],
 ];
 const buildVersion = import.meta.env.VITE_APP_VERSION || "dev";
+const backgroundRefreshMilliseconds = 15_000;
+const activeSyncRefreshMilliseconds = 3_000;
 
 function App() {
   const [view, setView] = useState<View>("inbox");
@@ -41,6 +43,7 @@ function App() {
   const [jellyfinRemotes, setJellyfinRemotes] = useState<JellyfinRemote[]>([]);
   const [error, setError] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>();
+  const refreshRunning = useRef(false);
   const refreshIntegrations = useCallback(
     () =>
       request<Integrations>("/api/integrations")
@@ -54,20 +57,37 @@ function App() {
     () => request<Page<Task>>("/api/inbox").then((data) => setInboxCount(data.total)).catch(() => undefined),
     [],
   );
-  useEffect(() => {
-    void refreshIntegrations();
-    void refreshJellyfinRemote();
-    void refreshUpdate();
-    void refreshInboxCount();
-  }, [refreshInboxCount, refreshIntegrations, refreshJellyfinRemote, refreshUpdate]);
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void refreshIntegrations();
-      void refreshJellyfinRemote();
-      void refreshInboxCount();
-    }, 3000);
-    return () => window.clearInterval(timer);
+  const refreshBackgroundState = useCallback(async () => {
+    if (refreshRunning.current) return;
+    refreshRunning.current = true;
+    try {
+      await Promise.allSettled([
+        refreshIntegrations(),
+        refreshJellyfinRemote(),
+        refreshInboxCount(),
+      ]);
+    } finally {
+      refreshRunning.current = false;
+    }
   }, [refreshInboxCount, refreshIntegrations, refreshJellyfinRemote]);
+  useEffect(() => {
+    void refreshBackgroundState();
+    void refreshUpdate();
+  }, [refreshBackgroundState, refreshUpdate]);
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshBackgroundState();
+    };
+    const interval = integrations?.trakt.sync.running
+      ? activeSyncRefreshMilliseconds
+      : backgroundRefreshMilliseconds;
+    const timer = window.setInterval(refreshWhenVisible, interval);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [integrations?.trakt.sync.running, refreshBackgroundState]);
   const traktState = getTraktState(integrations?.trakt);
   const jellyfinState = getJellyfinState(integrations?.jellyfin, jellyfinRemotes);
   return (
@@ -1041,11 +1061,6 @@ function SettingsView({
       .then((value) => setJellyfinRemotes(value.sources))
       .catch((e) => onError(e.message));
   }, [onError]);
-  useEffect(() => {
-    if (!jellyfinRemotes.length) return;
-    const timer = window.setInterval(() => void request<JellyfinRemotes>("/api/integrations/jellyfin/remotes").then((value)=>setJellyfinRemotes(value.sources)).catch(() => undefined), 5000);
-    return () => window.clearInterval(timer);
-  }, [jellyfinRemotes.length]);
   const runIntegrationAction = async (action: () => Promise<string>) => {
     setIntegrationBusy(true);
     setIntegrationMessage("");

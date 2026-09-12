@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -201,6 +202,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -231,6 +234,21 @@ describe("WatchWeaver dashboard", () => {
     render(<App />);
     await screen.findByText("The Example");
     expect(screen.queryByRole("button", { name: /Refresh Inbox data/ })).not.toBeInTheDocument();
+  });
+  it("suspends routine refresh while hidden and refreshes once when visible", async () => {
+    render(<App />);
+    await screen.findByText("Trakt · Connected");
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockClear();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    vi.useFakeTimers();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/integrations")).toBe(false);
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/integrations")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/integrations")).toHaveLength(1);
   });
   it("identifies whether history arrived through Trakt or directly from Jellyfin", async () => {
     historyTrackingSource = "jellyfin";
@@ -509,14 +527,16 @@ describe("WatchWeaver dashboard", () => {
       return json({ error: "not found" }, 404);
     });
     currentIntegrations = { ...integrations, trakt: { ...integrations.trakt, sync: { ...integrations.trakt.sync, running: true } } };
+    vi.useFakeTimers();
     render(<App />);
-    expect(await screen.findByText(/Syncing with Trakt/i)).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(/Syncing with Trakt/i)).toBeInTheDocument();
     expect(screen.queryByText("No rating prompts waiting")).not.toBeInTheDocument();
     currentIntegrations = integrations;
-    await new Promise((resolve) => window.setTimeout(resolve, 3100));
-    await waitFor(() => expect(screen.getByText("No prompts waiting")).toBeInTheDocument());
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByText("No prompts waiting")).toBeInTheDocument();
     expect(inboxCalls).toBeGreaterThan(1);
-  }, 5000);
+  });
   it("treats scheduled polling as idle rather than an active sync", async () => {
     render(<App />);
     expect(await screen.findByText("The Example")).toBeInTheDocument();
