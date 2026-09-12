@@ -3,27 +3,34 @@ package persistence
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 const defaultMigrationsDir = "migrations"
+const defaultMigrationBackupRetention = 5
 
 //go:embed migrations/*.up.sql
 var embeddedMigrations embed.FS
 
 type Options struct {
-	Path          string
-	MigrationsFS  fs.FS
-	MigrationsDir string
+	Path                     string
+	MigrationsFS             fs.FS
+	MigrationsDir            string
+	MigrationBackupDir       string
+	CredentialKeyPath        string
+	MigrationBackupRetention int
 }
 
 func OpenAndMigrate(opts Options) (*sql.DB, error) {
@@ -37,9 +44,30 @@ func OpenAndMigrate(opts Options) (*sql.DB, error) {
 		migrationsDir = defaultMigrationsDir
 	}
 
+	migrations, err := loadMigrations(migrationsFS, migrationsDir)
+	if err != nil {
+		return nil, err
+	}
+	databaseExisted := regularNonEmptyFile(opts.Path)
 	db, err := openSQLite(opts.Path)
 	if err != nil {
 		return nil, err
+	}
+
+	if databaseExisted {
+		pending, err := pendingMigrations(db, migrations)
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if len(pending) > 0 {
+			backupPath, err := createMigrationBackup(db, opts, pending[len(pending)-1].version)
+			if err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("create pre-migration safety backup: %w", err)
+			}
+			log.Printf("pre-migration safety backup created: %s", backupPath)
+		}
 	}
 
 	if err := RunMigrations(db, migrationsFS, migrationsDir); err != nil {
@@ -48,6 +76,132 @@ func OpenAndMigrate(opts Options) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func regularNonEmptyFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+func pendingMigrations(db *sql.DB, migrations []migration) ([]migration, error) {
+	var tableExists int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'`).Scan(&tableExists); err != nil {
+		return nil, fmt.Errorf("inspect migration state: %w", err)
+	}
+	if tableExists == 0 {
+		return migrations, nil
+	}
+	pending := make([]migration, 0)
+	for _, item := range migrations {
+		var exists int
+		err := db.QueryRow("SELECT 1 FROM schema_migrations WHERE version = ?", item.version).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			pending = append(pending, item)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect migration version %d: %w", item.version, err)
+		}
+	}
+	return pending, nil
+}
+
+func createMigrationBackup(db *sql.DB, opts Options, targetVersion int64) (string, error) {
+	backupDir := opts.MigrationBackupDir
+	if backupDir == "" {
+		backupDir = filepath.Join(filepath.Dir(opts.Path), "backups")
+	}
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	destination := filepath.Join(backupDir, fmt.Sprintf("watchweaver-pre-migration-v%06d-%s.db", targetVersion, stamp))
+	if err := Backup(db, destination); err != nil {
+		return "", err
+	}
+	cleanup := func() {
+		_ = os.Remove(destination + ".key")
+		_ = os.Remove(destination)
+	}
+	if err := VerifyBackup(destination); err != nil {
+		cleanup()
+		return "", err
+	}
+	keyPath := opts.CredentialKeyPath
+	if keyPath == "" {
+		keyPath = filepath.Join(filepath.Dir(opts.Path), ".watchweaver.key")
+	}
+	if _, err := os.Stat(keyPath); err == nil {
+		if err := copyExclusive(keyPath, destination+".key", 0o600); err != nil {
+			cleanup()
+			return "", fmt.Errorf("copy credential key: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		cleanup()
+		return "", fmt.Errorf("inspect credential key: %w", err)
+	}
+	retention := opts.MigrationBackupRetention
+	if retention == 0 {
+		retention = defaultMigrationBackupRetention
+	}
+	if retention > 0 {
+		if err := retainMigrationBackups(backupDir, retention); err != nil {
+			return "", err
+		}
+	}
+	return destination, nil
+}
+
+func VerifyBackup(path string) error {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		return fmt.Errorf("open backup for verification: %w", err)
+	}
+	defer db.Close()
+	var result string
+	if err := db.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
+		return fmt.Errorf("verify backup integrity: %w", err)
+	}
+	if !strings.EqualFold(result, "ok") {
+		return fmt.Errorf("verify backup integrity: %s", result)
+	}
+	return nil
+}
+
+func copyExclusive(source, destination string, mode fs.FileMode) error {
+	raw, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(raw); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func retainMigrationBackups(dir string, keep int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("inspect migration backups: %w", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "watchweaver-pre-migration-") && strings.HasSuffix(entry.Name(), ".db") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names[:max(0, len(names)-keep)] {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("remove expired migration backup: %w", err)
+		}
+		if err := os.Remove(filepath.Join(dir, name+".key")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove expired migration backup key: %w", err)
+		}
+	}
+	return nil
 }
 
 // Backup writes a transactionally consistent SQLite snapshot. The destination
