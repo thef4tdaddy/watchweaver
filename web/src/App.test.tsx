@@ -421,6 +421,23 @@ describe("WatchWeaver dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByPlaceholderText("Seedbox Jellyfin")).not.toBeInTheDocument();
   });
+  it("persists an edited Jellyfin connection name and refreshes reconnect state", async () => {
+    currentJellyfinRemotes = [{ id:"seedbox", name:"Jellyfin", configured:true, enabled:true, url:"https://jellyfin.example", connected:true, reconnect_count:0, events_received:0, protocol_version:1 }];
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    const name = await screen.findByLabelText("Connection name");
+    fireEvent.change(name, { target: { value: "Seedbox Jellyfin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/integrations/jellyfin/remotes/seedbox",
+      expect.objectContaining({ method: "PUT", body: expect.stringContaining('"name":"Seedbox Jellyfin"') }),
+    ));
+    expect(await screen.findByDisplayValue("Seedbox Jellyfin")).toBeInTheDocument();
+
+    currentJellyfinRemotes = [{ ...currentJellyfinRemotes[0], connected:true, events_received:1, last_event_at:"2026-09-19T14:00:00Z" }];
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 3_100)); });
+    expect(await screen.findByText("Receiving events")).toBeInTheDocument();
+  });
   it("keeps connected Trakt credentials collapsed until explicitly edited", async () => {
     render(<App />);
     await screen.findByText("The Example");
