@@ -180,8 +180,6 @@ func (s *Service) evaluatePrompt(ctx context.Context, e Event, mediaID int64, pr
 	}
 	if metadata.FinaleFromTrakt(e.Item.EpisodeType).CompletesSeason() {
 		batch.CompletedSeasonIDs = []int64{seasonID}
-	} else if inventoryComplete(e.Item) {
-		batch.CompletedSeasonIDs = []int64{seasonID}
 	} else if caughtUp(e.Item) {
 		batch.NewEpisodeIDs = []int64{mediaID}
 		batch.Seasons = []prompts.SeasonState{{SeasonID: seasonID, ShowID: showID, InventoryKnown: true, Episodes: []prompts.Episode{
@@ -191,10 +189,6 @@ func (s *Service) evaluatePrompt(ctx context.Context, e Event, mediaID int64, pr
 	}
 	_, err := prompts.NewService(s.db).Apply(ctx, batch)
 	return err
-}
-
-func inventoryComplete(item Item) bool {
-	return item.SeasonEpisodeCount != nil && item.SeasonWatchedEpisodeCount != nil && item.SeasonFutureEpisodeCount != nil && *item.SeasonEpisodeCount > 0 && *item.SeasonWatchedEpisodeCount == *item.SeasonEpisodeCount && *item.SeasonFutureEpisodeCount == 0
 }
 
 func caughtUp(item Item) bool {

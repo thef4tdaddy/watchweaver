@@ -1061,6 +1061,15 @@ function SettingsView({
   const [jellyfinUserID, setJellyfinUserID] = useState("");
   const [jellyfinMode, setJellyfinMode] = useState<"push" | "connect">("connect");
   const [jellyfinAddOpen, setJellyfinAddOpen] = useState(false);
+  const jellyfinDirty = useRef(new Set<string>());
+  const refreshRemoteJellyfin = useCallback(() =>
+    request<JellyfinRemotes>("/api/integrations/jellyfin/remotes").then((value) => {
+      setJellyfinRemotes((current) => value.sources.map((next) => {
+        if (!jellyfinDirty.current.has(next.id)) return next;
+        const edited = current.find((item) => item.id === next.id);
+        return edited ? { ...next, name: edited.name, url: edited.url, user_id: edited.user_id, enabled: edited.enabled } : next;
+      }));
+    }), []);
   useEffect(() => {
     request<Settings>("/api/settings")
       .then(setSettings)
@@ -1071,10 +1080,13 @@ function SettingsView({
         setDiscordEnabled(value.discord.enabled);
       })
       .catch((e) => onError(e.message));
-    request<JellyfinRemotes>("/api/integrations/jellyfin/remotes")
-      .then((value) => setJellyfinRemotes(value.sources))
+    refreshRemoteJellyfin()
       .catch((e) => onError(e.message));
-  }, [onError]);
+  }, [onError, refreshRemoteJellyfin]);
+  useEffect(() => {
+    const timer = window.setInterval(() => void refreshRemoteJellyfin().catch(() => undefined), 3_000);
+    return () => window.clearInterval(timer);
+  }, [refreshRemoteJellyfin]);
   const runIntegrationAction = async (action: () => Promise<string>) => {
     setIntegrationBusy(true);
     setIntegrationMessage("");
@@ -1144,7 +1156,7 @@ function SettingsView({
     });
   const updateRemoteJellyfin = (source: JellyfinRemote) => runIntegrationAction(async()=>{
     const value=await request<JellyfinRemote>(`/api/integrations/jellyfin/remotes/${source.id}`,{method:"PUT",body:JSON.stringify({name:source.name,enabled:source.enabled,url:source.url,user_id:source.user_id||"",api_key:jellyfinKeys[source.id]||""})});
-    setJellyfinRemotes((current)=>current.map((item)=>item.id===value.id?value:item)); setJellyfinKeys((current)=>({...current,[source.id]:""})); return `${value.name} updated.`;
+    jellyfinDirty.current.delete(source.id); setJellyfinRemotes((current)=>current.map((item)=>item.id===value.id?value:item)); setJellyfinKeys((current)=>({...current,[source.id]:""})); return `${value.name} updated.`;
   });
   const removeRemoteJellyfin = (source: JellyfinRemote) => {
     if (!window.confirm(`Delete the Jellyfin connection “${source.name}”?`)) return Promise.resolve();
@@ -1257,12 +1269,12 @@ function SettingsView({
 				{jellyfinRemotes.map((source)=><div className="remote-source" key={source.id} aria-label={`Jellyfin source ${source.name}`}>
 					<div className="remote-source-heading"><div><strong>{source.name}</strong><small>{source.url}</small><small>Mode: WatchWeaver → Jellyfin</small></div><span className={`state ${source.connected ? "confirmed" : "pending"}`}>{jellyfinRemoteStateLabel(source)}</span></div>
 					<div className="two-col jellyfin-fields">
-					<label>Connection name<input value={source.name} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,name:event.target.value}:item))}/></label>
-					<label>Jellyfin URL<input type="url" value={source.url||""} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,url:event.target.value}:item))}/></label>
+                  <label>Connection name<input value={source.name} onChange={(event)=>{jellyfinDirty.current.add(source.id);setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,name:event.target.value}:item));}}/></label>
+                  <label>Jellyfin URL<input type="url" value={source.url||""} onChange={(event)=>{jellyfinDirty.current.add(source.id);setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,url:event.target.value}:item));}}/></label>
 					<label>New API key (optional)<input type="password" value={jellyfinKeys[source.id]||""} onChange={(event)=>setJellyfinKeys((current)=>({...current,[source.id]:event.target.value}))} placeholder="Leave blank to keep saved key" autoComplete="new-password"/></label>
-					<label>Jellyfin user ID (optional)<input value={source.user_id||""} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,user_id:event.target.value}:item))}/></label>
+                  <label>Jellyfin user ID (optional)<input value={source.user_id||""} onChange={(event)=>{jellyfinDirty.current.add(source.id);setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,user_id:event.target.value}:item));}}/></label>
 					</div>
-					<label className="inline-check"><input type="checkbox" checked={source.enabled} onChange={(event)=>setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,enabled:event.target.checked}:item))}/> Keep this connection enabled</label>
+                  <label className="inline-check"><input type="checkbox" checked={source.enabled} onChange={(event)=>{jellyfinDirty.current.add(source.id);setJellyfinRemotes((current)=>current.map((item)=>item.id===source.id?{...item,enabled:event.target.checked}:item));}}/> Keep this connection enabled</label>
 					<div className="connection-info compact"><StatusDot ok={source.connected} label={source.connected ? source.events_received ? "Receiving events" : "Connected · waiting for the first event" : source.enabled ? "Connecting" : "Disabled"}/><div className="connection-timeline">{source.last_attempt_at&&<small>Last attempt: {formatDate(source.last_attempt_at)}</small>}{source.last_connected_at&&<small>Last connected: {formatDate(source.last_connected_at)}</small>}{source.last_event_at&&<small>Last event: {formatDate(source.last_event_at)}</small>}{source.next_retry_at&&<small>Next retry: {formatDate(source.next_retry_at)}</small>}<small>{source.events_received} events received · {source.reconnect_count} reconnects</small></div>{source.last_error&&<small className="warning">{source.last_error_code && <strong>{source.last_error_code.replaceAll("_", " ")}: </strong>}{source.last_error}</small>}</div>
 					<div className="settings-actions"><button className="primary" disabled={integrationBusy||!source.name||!source.url} onClick={()=>void updateRemoteJellyfin(source)}>Save changes</button><button className="secondary" disabled={integrationBusy} onClick={()=>void testRemoteJellyfin(source.id,source.name)}>Test</button><button className="secondary danger" disabled={integrationBusy} onClick={()=>void removeRemoteJellyfin(source)}>Delete</button></div>
 				</div>)}

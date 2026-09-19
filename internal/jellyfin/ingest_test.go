@@ -224,7 +224,7 @@ func TestEpisodePromptHandoffUsesSettledTVRules(t *testing.T) {
 	}{
 		{name: "backlog is silent", season: 1, episode: 2, total: 10, watched: 2, latest: 10},
 		{name: "caught up prompts for episode rating", season: 1, episode: 4, total: 4, watched: 4, future: 1, latest: 4, wantType: "episode"},
-		{name: "completed season prompts for season rating", season: 1, episode: 10, total: 10, watched: 10, latest: 10, wantType: "season"},
+		{name: "library inventory alone does not prove a season ended", season: 1, episode: 10, total: 10, watched: 10, latest: 10},
 		{name: "out of order is silent", season: 1, episode: 3, total: 4, watched: 4, future: 1, latest: 4},
 		{name: "special is silent", season: 0, episode: 1, total: 1, watched: 1, latest: 1},
 		{name: "explicit finale prompts for season rating", season: 2, episode: 8, episodeType: "season_finale", wantType: "season"},
