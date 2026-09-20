@@ -43,3 +43,5 @@ jobs:
           done
           wget -qO- http://127.0.0.1:18080/api/settings
           docker exec watchweaver-ci-restored test -s /data/pre-restore.db
+      - name: Verify bot isolation, handshake, and direct SPA routes
+        run: bash scripts/test-bot-container.sh watchweaver:test

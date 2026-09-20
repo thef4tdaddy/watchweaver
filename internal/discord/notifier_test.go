@@ -225,3 +225,26 @@ func insertMedia(t *testing.T, db *sql.DB, query string, args ...any) int64 {
 	id, _ := result.LastInsertId()
 	return id
 }
+
+func TestWebhookDoesNotTakeOverBotOwnedTasks(t *testing.T) {
+	db, movie := notifierDB(t)
+	result, err := db.Exec(`INSERT INTO prompt_tasks(media_id,task_type,state) VALUES(?,'rating','pending')`, movie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := result.LastInsertId()
+	if _, err = db.Exec(`INSERT INTO bot_notifications(task_id,revision,state) VALUES(?,1,'pending')`, task); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { calls++; return response(204, ""), nil })}
+	for _, skip := range []bool{true, false} {
+		notifier := NewNotifier(db, Options{WebhookURL: "https://discord.invalid/secret", HTTPClient: client, SkipTaskNotifications: skip})
+		if err = notifier.Poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("bot-owned task was delivered by webhook %d times", calls)
+	}
+}

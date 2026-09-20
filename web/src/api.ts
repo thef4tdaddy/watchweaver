@@ -10,6 +10,8 @@ export type Media = {
   external_ids: Record<string, string>;
 };
 export type Task = {
+ revision?:number;
+ media_revision?:number;
   id: number;
   type: string;
   state: string;
