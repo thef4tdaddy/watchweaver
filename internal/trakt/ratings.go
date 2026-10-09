@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -132,12 +133,13 @@ func (s *RatingSync) FlushPending(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	var failures []error
 	for _, p := range work {
 		if err := s.flushOne(ctx, p.mediaID, p.rating, p.delete, p.attempt); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (s *RatingSync) fetchRatings(ctx context.Context) ([]remoteRating, error) {
@@ -291,7 +293,7 @@ func (s *RatingSync) applyRemote(ctx context.Context, mediaID int64, value int, 
 func (s *RatingSync) flushOne(ctx context.Context, mediaID int64, rating sql.NullInt64, deleting bool, attempt int) error {
 	mediaType, traktID, err := s.outboundIdentity(ctx, mediaID)
 	if err != nil {
-		return err
+		return s.recordFailure(ctx, mediaID, attempt, err.Error(), 0)
 	}
 	item := map[string]any{"ids": map[string]string{"trakt": traktID}}
 	if rating.Valid {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/thef4tdaddy/watchweaver/internal/metadata"
 	"github.com/thef4tdaddy/watchweaver/internal/prompts"
+	"github.com/thef4tdaddy/watchweaver/internal/watches"
 )
 
 var (
@@ -130,6 +131,11 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if finale := metadata.FinaleFromTrakt(e.Item.EpisodeType); e.Item.Type == "episode" && finale != metadata.FinaleNone {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO episode_metadata(media_id,finale_type,provider) VALUES(?,?,'jellyfin') ON CONFLICT(media_id) DO UPDATE SET finale_type=excluded.finale_type,provider=excluded.provider`, mediaID, finale); err != nil {
+			return Result{}, err
+		}
+	}
 	previouslyWatched := false
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM watch_events WHERE media_id=? AND deleted_at IS NULL)`, mediaID).Scan(&previouslyWatched); err != nil {
 		return Result{}, err
@@ -141,6 +147,10 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 		return Result{}, err
 	}
 	watchID, err := res.LastInsertId()
+	if err != nil {
+		return Result{}, err
+	}
+	duplicate, err := watches.Pair(ctx, tx, watchID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -158,8 +168,10 @@ func (s *Service) Accept(ctx context.Context, e Event) (Result, error) {
 	// The watch is acknowledged once durable. Prompt evaluation is deliberately
 	// downstream so a task failure cannot make the plugin ambiguously redeliver
 	// an already accepted watch.
-	if err := s.evaluatePrompt(ctx, e, mediaID, previouslyWatched); err != nil {
-		log.Printf("Jellyfin prompt evaluation deferred after durable event acceptance: %v", err)
+	if !duplicate {
+		if err := s.evaluatePrompt(ctx, e, mediaID, previouslyWatched); err != nil {
+			log.Printf("Jellyfin prompt evaluation deferred after durable event acceptance: %v", err)
+		}
 	}
 	return Result{WatchEventID: watchID, ProtocolVersion: 1}, nil
 }

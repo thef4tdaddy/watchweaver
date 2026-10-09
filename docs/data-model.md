@@ -187,3 +187,11 @@ The v0.1 schema is sufficient when it can support all of the following without r
 8. Track Letterboxd export state per movie watch event.
 9. Track Serializd synchronization checkpoints/counters.
 10. Run forward schema migrations safely on startup.
+
+## Reports of the same viewing
+
+Jellyfin and Trakt reports with the same established media identity and watch times within two minutes are paired one-to-one. Both raw records and upstream event IDs remain stored for replay protection. `watch_events.duplicate_of` links the later report to its canonical watch; history, Letterboxd exports, and Serializd watch counts exclude the duplicate report. Matching does not use title alone, and same-source events are retained as separate viewings.
+
+The upgrade pairs existing reports only when they already share a media ID. Previously split media records without a proven identity are not automatically combined. New Trakt imports reuse shared TMDB, IMDb, or TVDB identities and attach the Trakt ID to the existing media record.
+
+History adds a season-completion milestone when the watched episode is explicitly marked as a season or series finale. A latest-available episode, mid-season finale, or season 0 does not establish completion. Milestones are derived entries, separate from viewing counts.

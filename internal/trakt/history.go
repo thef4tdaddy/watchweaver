@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/thef4tdaddy/watchweaver/internal/metadata"
+	"github.com/thef4tdaddy/watchweaver/internal/watches"
 )
 
 type HistoryImporter struct {
@@ -286,10 +287,14 @@ func (h *HistoryImporter) persistItem(ctx context.Context, item historyItem, bas
 	if err != nil {
 		return false, 0, err
 	}
+	duplicate, err := watches.Pair(ctx, tx, eventID)
+	if err != nil {
+		return false, 0, err
+	}
 	if err = tx.Commit(); err != nil {
 		return false, 0, err
 	}
-	return true, eventID, nil
+	return !duplicate, eventID, nil
 }
 
 func (h *HistoryImporter) storeEpisodeMetadata(ctx context.Context, tx *sql.Tx, mediaID int64, item historyItem) error {
@@ -347,16 +352,18 @@ func (h *HistoryImporter) ensureMedia(ctx context.Context, tx *sql.Tx, item hist
 	}
 }
 func ensureMediaItem(ctx context.Context, tx *sql.Tx, mediaType, title string, year int, parentID *int64, number *int, ids map[string]any) (int64, error) {
-	if ids != nil {
-		if traktID, ok := numericID(ids["trakt"]); ok {
-			var id int64
-			err := tx.QueryRowContext(ctx, `SELECT media_id FROM external_ids WHERE provider='trakt' AND external_id=?`, strconv.FormatInt(traktID, 10)).Scan(&id)
-			if err == nil {
-				return id, nil
-			}
-			if err != sql.ErrNoRows {
-				return 0, err
-			}
+	for _, provider := range []string{"trakt", "tmdb", "imdb", "tvdb"} {
+		value, ok := stringID(ids[provider])
+		if !ok || value == "" {
+			continue
+		}
+		var id int64
+		err := tx.QueryRowContext(ctx, `SELECT x.media_id FROM external_ids x JOIN media_items m ON m.id=x.media_id WHERE x.provider=? AND x.external_id=? AND m.media_type=?`, provider, value, mediaType).Scan(&id)
+		if err == nil {
+			return id, attachTraktIDs(ctx, tx, id, ids)
+		}
+		if err != sql.ErrNoRows {
+			return 0, err
 		}
 	}
 	var res sql.Result
@@ -379,13 +386,13 @@ func ensureMediaItem(ctx context.Context, tx *sql.Tx, mediaType, title string, y
 		if mediaType == "season" {
 			var id int64
 			if e := tx.QueryRowContext(ctx, `SELECT id FROM media_items WHERE media_type='season' AND parent_id=? AND season_number=?`, *parentID, *number).Scan(&id); e == nil {
-				return id, nil
+				return id, attachTraktIDs(ctx, tx, id, ids)
 			}
 		}
 		if mediaType == "episode" {
 			var id int64
 			if e := tx.QueryRowContext(ctx, `SELECT id FROM media_items WHERE media_type='episode' AND parent_id=? AND episode_number=?`, *parentID, *number).Scan(&id); e == nil {
-				return id, nil
+				return id, attachTraktIDs(ctx, tx, id, ids)
 			}
 		}
 		return 0, err
@@ -394,17 +401,17 @@ func ensureMediaItem(ctx context.Context, tx *sql.Tx, mediaType, title string, y
 	if err != nil {
 		return 0, err
 	}
-	for provider, raw := range ids {
-		if provider != "trakt" && provider != "tmdb" && provider != "imdb" {
-			continue
-		}
-		if value, ok := stringID(raw); ok && value != "" {
-			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO external_ids(media_id,provider,external_id) VALUES(?,?,?)`, id, provider, value); err != nil {
-				return 0, err
+	return id, attachTraktIDs(ctx, tx, id, ids)
+}
+func attachTraktIDs(ctx context.Context, tx *sql.Tx, id int64, ids map[string]any) error {
+	for _, provider := range []string{"trakt", "tmdb", "imdb", "tvdb"} {
+		if value, ok := stringID(ids[provider]); ok && value != "" {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO external_ids(media_id,provider,external_id) VALUES(?,?,?)`, id, provider, value); err != nil {
+				return err
 			}
 		}
 	}
-	return id, nil
+	return nil
 }
 func numericID(v any) (int64, bool) {
 	switch n := v.(type) {

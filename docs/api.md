@@ -17,7 +17,7 @@ responses and never fall through to the SPA.
   the supplied values in the same transaction that completes the task.
 - `POST /api/tasks/{id}/skip` skips an unresolved task.
 - `POST /api/tasks/{id}/snooze` accepts `{"until":"<future RFC3339 time>"}`.
-- `GET /api/history?page=1&per_page=50` lists distinct watch events newest first.
+- `GET /api/history?page=1&per_page=50` lists deduplicated watches and confirmed season-completion milestones newest first. Optional `type=movie|tv|season` and `location=<recorded location>` filters apply before pagination. TV includes episodes and completed seasons; `season` selects completion milestones only. Responses include available `locations`; each item includes `kind` (`watch` or `season_completed`) and `location`. A location is the recorded Jellyfin server name when available, otherwise its tracking source. Trakt alone does not identify a physical viewing location.
 
 Pagination is ordered deterministically and `per_page` may be 1 through 100.
 

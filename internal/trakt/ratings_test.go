@@ -293,3 +293,53 @@ func TestDeleteRatingUsesRemoveEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMissingIdentityDoesNotStarveOtherRatingsAndRetriesAfterMatch(t *testing.T) {
+	db, movie := ratingTestDB(t)
+	if _, err := db.Exec(`DELETE FROM external_ids WHERE media_id=?`, movie); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Exec(`INSERT INTO media_items(media_type,title) VALUES('movie','Second movie')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,'trakt','43')`, second); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	local := localratings.NewService(db)
+	local.SetNow(func() time.Time { return now })
+	for _, id := range []int64{movie, second} {
+		if err := local.SetLocal(context.Background(), id, 8); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(http.StatusCreated) }))
+	defer server.Close()
+	sync := NewRatingSync(db, server.URL, server.Client(), "client", "token")
+	sync.SetNow(func() time.Time { return now })
+	if err := sync.FlushPending(context.Background()); err == nil {
+		t.Fatal("missing identity must remain visible")
+	}
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM rating_sync_state WHERE pending_rating IS NOT NULL`).Scan(&remaining); err != nil || remaining != 1 || calls != 1 {
+		t.Fatalf("remaining=%d calls=%d err=%v", remaining, calls, err)
+	}
+	var attempts int
+	var next string
+	if err := db.QueryRow(`SELECT attempt_count,next_attempt_at FROM rating_sync_state WHERE media_id=?`, movie).Scan(&attempts, &next); err != nil || attempts != 1 || next == "" {
+		t.Fatalf("retry not recorded: %d %q %v", attempts, next, err)
+	}
+	if _, err := db.Exec(`INSERT INTO external_ids(media_id,provider,external_id) VALUES(?,'trakt','42')`, movie); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	if err := sync.FlushPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls=%d", calls)
+	}
+}

@@ -50,6 +50,7 @@ const task: Task = {
 let activeTask: Task | undefined = task;
 let serializdReviews: Array<Record<string, unknown>> = [];
 let historyTrackingSource = "trakt";
+let showCompletedSeason = false;
 let currentJellyfinRemotes: JellyfinRemote[] = [];
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -64,6 +65,7 @@ beforeEach(() => {
   activeTask = task;
   serializdReviews = [];
   historyTrackingSource = "trakt";
+  showCompletedSeason = false;
   currentJellyfinRemotes = [];
   currentIntegrations = integrations;
   vi.stubGlobal(
@@ -89,7 +91,7 @@ beforeEach(() => {
           items: activeTask ? [activeTask] : [],
         });
       if (path.startsWith("/api/history"))
-        return json({ page: 1, per_page: 20, total: 1, total_pages: 1, items: [{ id: 1, source: historyTrackingSource, source_instance: historyTrackingSource === "jellyfin" ? "Seedbox Jellyfin" : undefined, watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: task.media }] });
+        return json({ page: 1, per_page: 20, total: 1, total_pages: 1, locations: ["Trakt", "Seedbox Jellyfin"], items: [{ id: showCompletedSeason ? -1 : 1, kind: showCompletedSeason ? "season_completed" : "watch", location: historyTrackingSource === "jellyfin" ? "Seedbox Jellyfin" : "Trakt", source: historyTrackingSource, source_instance: historyTrackingSource === "jellyfin" ? "Seedbox Jellyfin" : undefined, watched_at: "2026-09-01T12:00:00Z", source_watched_at: "2026-09-01T12:00:00Z", media: showCompletedSeason ? { id: 12, type: "season", title: "Example Show Season 2", show_title: "Example Show", season_number: 2, external_ids: {} } : task.media }] });
       if (path === "/api/media/9/rating")
         return json({ media_id: 9, rating: 8, stars: 4 });
       if (path === "/api/media/9/review" && !init?.method)
@@ -259,6 +261,22 @@ describe("WatchWeaver dashboard", () => {
     expect(fetchMock.mock.calls.some(([path]) => path === "/api/integrations")).toBe(true);
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/integrations")).toHaveLength(1);
   });
+  it("filters history and edits completed seasons", async () => {
+    showCompletedSeason = true;
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("Season completed")).toBeInTheDocument();
+    expect(screen.getByText("Example Show · Season 2")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "History content" }), { target: { value: "season" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Location watched" }), { target: { value: "Seedbox Jellyfin" } });
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/history?page=1&per_page=20&type=season&location=Seedbox+Jellyfin", expect.anything()));
+    fireEvent.click(screen.getByRole("button", { name: "Rate or review" }));
+    expect(await screen.findByRole("textbox", { name: "Review for Season 2" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith("/api/media/12/rating", expect.anything());
+    fireEvent.change(screen.getByRole("combobox", { name: "History content" }), { target: { value: "movie" } });
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/history?page=1&per_page=20&type=movie&location=Seedbox+Jellyfin", expect.anything()));
+  });
+
   it("identifies whether history arrived through Trakt or directly from Jellyfin", async () => {
     historyTrackingSource = "jellyfin";
     render(<App />);

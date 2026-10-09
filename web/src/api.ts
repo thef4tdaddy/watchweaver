@@ -18,6 +18,8 @@ export type Task = {
   media: Media;
 };
 export type HistoryItem = {
+  kind?: "watch" | "season_completed";
+  location?: string;
   id: number;
   source: string;
   source_event_id?: string;
