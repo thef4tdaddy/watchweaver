@@ -633,26 +633,45 @@ function Inbox({ onError, syncRunning, syncPhase, syncError, integrationLoaded, 
 
 function History({ onError }: { onError: (v: string) => void }) {
   const [pageNo, setPageNo] = useState(1);
-  const [data, setData] = useState<Page<HistoryItem>>();
+  const [data, setData] = useState<Page<HistoryItem> & { locations?: string[] }>();
   const [editing, setEditing] = useState<number>();
+  const [content, setContent] = useState("");
+  const [location, setLocation] = useState("");
   useEffect(() => {
-    request<Page<HistoryItem>>(`/api/history?page=${pageNo}&per_page=20`)
-      .then(setData)
-      .catch((e) => onError(e.message));
-  }, [pageNo, onError]);
+    let active = true;
+    const filters = new URLSearchParams();
+    if (content) filters.set("type", content);
+    if (location) filters.set("location", location);
+    request<Page<HistoryItem> & { locations?: string[] }>(`/api/history?page=${pageNo}&per_page=20${filters.size ? `&${filters}` : ""}`)
+      .then((value) => { if (active) setData(value); })
+      .catch((e) => { if (active) onError(e.message); });
+    return () => { active = false; };
+  }, [pageNo, content, location, onError]);
   if (!data) return <Loading />;
   return (
     <section>
       <div className="section-heading">
         <div>
           <p className="eyebrow">LOCAL ARCHIVE</p>
-          <h2>{data.total} distinct watches</h2>
+          <h2>{data.total} history entries</h2>
         </div>
+      </div>
+      <div className="history-filters">
+        <label>Content<select aria-label="History content" value={content} onChange={(e) => { setContent(e.target.value); setPageNo(1); setEditing(undefined); }}>
+          <option value="">Movies and TV</option>
+          <option value="movie">Movies</option>
+          <option value="tv">TV shows</option>
+          <option value="season">Completed seasons</option>
+        </select></label>
+        <label>Location watched<select aria-label="Location watched" value={location} onChange={(e) => { setLocation(e.target.value); setPageNo(1); setEditing(undefined); }}>
+          <option value="">All locations</option>
+          {(data.locations || []).map((value) => <option key={value} value={value}>{value}</option>)}
+        </select></label>
       </div>
       {data.items.length === 0 ? (
         <Empty
-          title="No history yet"
-          body="Connect Trakt to import your movie and episode history."
+          title={content || location ? "No matching history" : "No history yet"}
+          body={content || location ? "Try another content type or location." : "Connect Trakt or Jellyfin to import your watch history."}
         />
       ) : (
         <div className="timeline">
@@ -671,13 +690,14 @@ function History({ onError }: { onError: (v: string) => void }) {
               <span className="timeline-line" />
               <div className="history-card">
                 <div className="history-tags">
-                  <span className="tag">{item.media.type}</span>
+                  <span className="tag">{item.kind === "season_completed" ? "Season completed" : item.media.type}</span>
+                  {item.location && <span className="tag">{item.location}</span>}
                   <span className={`source-badge source-${item.source}`} aria-label={`Tracking source: ${source.label}`} title={source.detail}>{source.label}</span>
                 </div>
                 <h3>{item.media.title}</h3>
                 <p>
                   {item.media.show_title
-                    ? `${item.media.show_title} · S${item.media.season_number} E${item.media.episode_number}`
+                    ? `${item.media.show_title} · Season ${item.media.season_number}${item.media.episode_number !== undefined ? ` · Episode ${item.media.episode_number}` : ""}`
                     : item.media.year}
                 </p>
                 <small>{formatDate(item.watched_at)}</small>
@@ -698,7 +718,7 @@ function History({ onError }: { onError: (v: string) => void }) {
 function HistoryEditor({ item, onError }: { item: HistoryItem; onError: (v: string) => void }) {
   const targets = item.media.type === "episode" && item.media.season_id
     ? [{ id: item.media.id, label: "This episode", type: "episode" }, { id: item.media.season_id, label: `Season ${item.media.season_number}`, type: "season" }]
-    : [{ id: item.media.id, label: "This movie", type: "movie" }];
+    : [{ id: item.media.id, label: item.media.type === "season" ? `Season ${item.media.season_number}` : "This movie", type: item.media.type }];
   const [target, setTarget] = useState(targets[0]);
   const [rating, setRating] = useState<number>();
   const [review, setReview] = useState("");

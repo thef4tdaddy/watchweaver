@@ -331,7 +331,7 @@ func (s *Service) pendingRowsAt(ctx context.Context, location *time.Location) ([
 }
 
 func (s *Service) loadWatches(ctx context.Context) ([]watch, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT w.id,m.id,m.title,m.year,w.watched_at_utc,COALESCE(tmdb.external_id,''),COALESCE(imdb.external_id,'') FROM watch_events w JOIN media_items m ON m.id=w.media_id AND m.media_type='movie' LEFT JOIN external_ids tmdb ON tmdb.media_id=m.id AND tmdb.provider='tmdb' LEFT JOIN external_ids imdb ON imdb.media_id=m.id AND imdb.provider='imdb' WHERE w.deleted_at IS NULL ORDER BY w.watched_at_utc,w.id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT w.id,m.id,m.title,m.year,w.watched_at_utc,COALESCE(tmdb.external_id,''),COALESCE(imdb.external_id,'') FROM watch_events w JOIN media_items m ON m.id=w.media_id AND m.media_type='movie' LEFT JOIN external_ids tmdb ON tmdb.media_id=m.id AND tmdb.provider='tmdb' LEFT JOIN external_ids imdb ON imdb.media_id=m.id AND imdb.provider='imdb' WHERE w.deleted_at IS NULL AND w.duplicate_of IS NULL ORDER BY w.watched_at_utc,w.id`)
 	if err != nil {
 		return nil, err
 	}

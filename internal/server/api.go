@@ -76,6 +76,8 @@ type taskJSON struct {
 }
 
 type historyJSON struct {
+	Kind            string    `json:"kind"`
+	Location        string    `json:"location"`
 	ID              int64     `json:"id"`
 	Source          string    `json:"source"`
 	SourceEventID   *string   `json:"source_event_id,omitempty"`
@@ -382,15 +384,59 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	mediaType := r.URL.Query().Get("type")
+	if mediaType != "" && mediaType != "movie" && mediaType != "tv" && mediaType != "season" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid history type"})
+		return
+	}
+	location := r.URL.Query().Get("location")
+	// One canonical watch plus a separate milestone for each confirmed finale.
+	const entries = `WITH reports AS (
+  SELECT w.*,COALESCE(NULLIF(w.source_instance_name,''),NULLIF(peer.source_instance_name,''),CASE w.source WHEN 'trakt' THEN 'Trakt' WHEN 'jellyfin' THEN 'Jellyfin' ELSE w.source END) AS location,
+   COALESCE(w.source_instance_name,peer.source_instance_name) AS instance
+  FROM watch_events w LEFT JOIN watch_events peer ON peer.duplicate_of=w.id
+  WHERE w.deleted_at IS NULL AND w.duplicate_of IS NULL
+ ), entries AS (
+  SELECT id,source,source_event_id,instance,watched_at_utc,source_watched_at,media_id,location,'watch' AS kind FROM reports
+  UNION ALL
+  SELECT -w.id,w.source,w.source_event_id,w.instance,w.watched_at_utc,w.source_watched_at,m.parent_id,w.location,'season_completed'
+  FROM reports w JOIN media_items m ON m.id=w.media_id AND m.media_type='episode'
+  JOIN media_items season ON season.id=m.parent_id AND season.season_number>0
+  JOIN episode_metadata em ON em.media_id=m.id AND em.finale_type IN ('season','series')
+ ) `
+	const filter = ` FROM entries w JOIN media_items m ON m.id=w.media_id
+  LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id
+  WHERE (?='' OR (?='tv' AND m.media_type IN ('episode','season')) OR m.media_type=?) AND (?='' OR w.location=?)`
+	args := []any{mediaType, mediaType, mediaType, location, location}
 	var total int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM watch_events WHERE deleted_at IS NULL`).Scan(&total); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), entries+`SELECT COUNT(*)`+filter, args...).Scan(&total); err != nil {
 		internalError(w)
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT w.id,w.source,w.source_event_id,w.source_instance_name,w.watched_at_utc,w.source_watched_at,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,CASE WHEN m.media_type='episode' THEN p.id END,
-		CASE WHEN m.media_type='season' THEN p.title WHEN m.media_type='episode' THEN gp.title ELSE '' END
-		FROM watch_events w JOIN media_items m ON m.id=w.media_id LEFT JOIN media_items p ON p.id=m.parent_id LEFT JOIN media_items gp ON gp.id=p.parent_id
-		WHERE w.deleted_at IS NULL ORDER BY w.watched_at_utc DESC,w.id DESC LIMIT ? OFFSET ?`, perPage, (page-1)*perPage)
+	locationRows, err := a.db.QueryContext(r.Context(), entries+`SELECT DISTINCT location FROM entries ORDER BY location`)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	locations := make([]string, 0)
+	for locationRows.Next() {
+		var value string
+		if err := locationRows.Scan(&value); err != nil {
+			locationRows.Close()
+			internalError(w)
+			return
+		}
+		locations = append(locations, value)
+	}
+	err = locationRows.Err()
+	locationRows.Close()
+	if err != nil {
+		internalError(w)
+		return
+	}
+	args = append(args, perPage, (page-1)*perPage)
+	rows, err := a.db.QueryContext(r.Context(), entries+`SELECT w.id,w.source,w.source_event_id,w.instance,w.watched_at_utc,w.source_watched_at,m.id,m.media_type,m.title,m.year,CASE WHEN m.media_type='episode' THEN p.season_number ELSE m.season_number END,m.episode_number,CASE WHEN m.media_type='episode' THEN p.id END,
+  CASE WHEN m.media_type='season' THEN p.title WHEN m.media_type='episode' THEN gp.title ELSE '' END,w.kind,w.location`+filter+` ORDER BY w.watched_at_utc DESC,w.id ASC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		internalError(w)
 		return
@@ -402,7 +448,7 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 		var sourceID, sourceInstance, year sql.NullString
 		var season, episode sql.NullInt64
 		var seasonID sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.Source, &sourceID, &sourceInstance, &item.WatchedAt, &item.SourceWatchedAt, &item.Media.ID, &item.Media.Type, &item.Media.Title, &year, &season, &episode, &seasonID, &item.Media.ShowTitle); err != nil {
+		if err := rows.Scan(&item.ID, &item.Source, &sourceID, &sourceInstance, &item.WatchedAt, &item.SourceWatchedAt, &item.Media.ID, &item.Media.Type, &item.Media.Title, &year, &season, &episode, &seasonID, &item.Media.ShowTitle, &item.Kind, &item.Location); err != nil {
 			internalError(w)
 			return
 		}
@@ -423,7 +469,10 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, newPage(page, perPage, total, items))
+	writeJSON(w, http.StatusOK, struct {
+		pageJSON
+		Locations []string `json:"locations"`
+	}{newPage(page, perPage, total, items), locations})
 }
 
 func (a *API) taskAction(w http.ResponseWriter, r *http.Request) {

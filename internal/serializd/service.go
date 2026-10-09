@@ -86,7 +86,7 @@ func (s *Service) Status(ctx context.Context, options Options) (Status, error) {
 		}
 		status.OldestPendingAt = &parsed
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_events w JOIN media_items m ON m.id=w.media_id WHERE m.media_type='episode' AND w.deleted_at IS NULL`).Scan(&status.TrackedEpisodeWatches); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_events w JOIN media_items m ON m.id=w.media_id WHERE m.media_type='episode' AND w.deleted_at IS NULL AND w.duplicate_of IS NULL`).Scan(&status.TrackedEpisodeWatches); err != nil {
 		return Status{}, err
 	}
 	status.CountThresholdReached = status.PendingChanges > 0 && options.ReminderChanges > 0 && status.PendingChanges >= options.ReminderChanges

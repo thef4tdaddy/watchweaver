@@ -88,3 +88,7 @@ textarea,input{background:#020617;color:var(--ink)}
 .content,.settings-card,.remote-source,.remote-source-heading>div{min-width:0}
 .remote-source-heading small,.connection-info,.auth-code{overflow-wrap:anywhere}
 @media(max-width:520px){.settings-card{padding:17px}.card-heading,.source-heading,.remote-source-heading{align-items:flex-start;flex-direction:column}.settings-actions>*{flex:1 1 150px}.alert{gap:10px}.alert button{min-width:32px;min-height:32px}.auth-code{padding:14px}.auth-code strong{font-size:20px}}
+
+.history-filters { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+.history-filters label { display: grid; gap: .4rem; min-width: 12rem; }
+.history-filters select { width: 100%; }
